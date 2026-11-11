@@ -1,5 +1,6 @@
 import { Prisma } from '@/generated/prisma/client';
-import { ROLES } from '@/lib/constants';
+import { CREDENTIAL_PROVIDER_ID, ROLES } from '@/lib/constants';
+import { uuid } from '@/lib/crypto';
 import { getRandomChars } from '@/lib/generate';
 import prisma from '@/lib/prisma';
 import redis from '@/lib/redis';
@@ -29,7 +30,7 @@ export interface UserSummary {
 async function findUser(criteria: Prisma.UserFindUniqueArgs, options: GetUserOptions = {}) {
   const { includePassword = false, showDeleted = false } = options;
 
-  return prisma.client.user.findUnique({
+  const user = await prisma.client.user.findUnique({
     ...criteria,
     where: {
       ...criteria.where,
@@ -38,12 +39,24 @@ async function findUser(criteria: Prisma.UserFindUniqueArgs, options: GetUserOpt
     select: {
       id: true,
       username: true,
-      password: includePassword,
       role: true,
       createdAt: true,
       twoFactorRequired: true,
+      accounts: includePassword
+        ? { where: { providerId: CREDENTIAL_PROVIDER_ID }, select: { password: true } }
+        : false,
     },
   });
+
+  if (!user) {
+    return null;
+  }
+
+  const { accounts, ...rest } = user;
+
+  // The password is null for users who have none, such as those who only sign in through an
+  // external provider.
+  return { ...rest, ...(includePassword && { password: accounts?.[0]?.password ?? null }) };
 }
 
 export async function getUser(userId: string, options: GetUserOptions = {}) {
@@ -93,14 +106,38 @@ export async function createUser(data: {
   password: string;
   role: Role;
 }) {
+  const { id, username, password, role } = data;
+
+  // `password` is a bcrypt hash, the format better-auth is configured to verify. It is stored on
+  // the user's credential account, created in the same query.
   return prisma.client.user.create({
-    data,
+    data: {
+      id,
+      username,
+      displayUsername: username,
+      displayName: username,
+      email: getPlaceholderEmail(id),
+      role,
+      accounts: {
+        create: {
+          id: uuid(),
+          accountId: id,
+          providerId: CREDENTIAL_PROVIDER_ID,
+          password,
+        },
+      },
+    },
     select: {
       id: true,
       username: true,
       role: true,
     },
   });
+}
+
+/** Users have no real email address unless an external provider supplies one. */
+function getPlaceholderEmail(userId: string) {
+  return `${userId}@placeholder.local`;
 }
 
 export async function updateUser(userId: string, data: Prisma.UserUpdateInput) {
@@ -189,6 +226,10 @@ export async function deleteUser(userId: string) {
           id: userId,
         },
       }),
+      // A soft-deleted user keeps its row, so nothing cascades: remove its
+      // sign-in methods and sessions explicitly.
+      client.account.deleteMany({ where: { userId } }),
+      client.authSession.deleteMany({ where: { userId } }),
       client.share.deleteMany({ where: { entityId: { in: entityIds } } }),
       // deletedAt: null avoids restamping rows that were already soft-deleted earlier.
       client.link.updateMany({

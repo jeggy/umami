@@ -1,7 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { getApiUrl } from '@/lib/api-url';
-import { getClientAuthToken } from '@/lib/client';
 import { SHARE_CONTEXT_HEADER, SHARE_TOKEN_HEADER } from '@/lib/constants';
 import { type FetchResponse, httpDelete, httpGet, httpPatch, httpPost, httpPut } from '@/lib/fetch';
 import { useApp } from '@/store/app';
@@ -26,9 +25,9 @@ export function useApi() {
     return getApiUrl(url);
   };
 
-  // Read the token per request: the callbacks below are memoized, and changing the password replaces it.
+  // The session travels in an httpOnly cookie that the browser sends by itself.
   const getHeaders = (headers: any = {}) => {
-    return { authorization: `Bearer ${getClientAuthToken()}`, ...shareHeaders, ...headers };
+    return { ...shareHeaders, ...headers };
   };
 
   return {

@@ -12,7 +12,9 @@ export function checkPassword(password: string, passwordHash: string) {
   return bcrypt.compareSync(password, passwordHash);
 }
 
-export function hasDefaultPassword(user: { id: string; password: string } | null | undefined) {
+export function hasDefaultPassword(
+  user: { id: string; password?: string | null } | null | undefined,
+) {
   // Cloud accounts are not created by the seed migration.
   if (process.env.CLOUD_MODE) {
     return false;

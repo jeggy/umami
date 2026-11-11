@@ -5122,7 +5122,7 @@ export abstract class GeneratedUmamiClient {
 
   /**
    * Log out
-   * Ends the current authentication session by removing its stored token when Redis-backed sessions are enabled.
+   * Ends the current authentication session and clears its cookie.
    * `POST /api/auth/logout`
    */
   logout(
@@ -5179,7 +5179,7 @@ export abstract class GeneratedUmamiClient {
 
   /**
    * Create a single sign-on token
-   * Returns the authenticated user and a new token valid for 24 hours. Requires Redis-backed authentication.
+   * Returns the authenticated user and a single-use token valid for two minutes, which the /sso page exchanges for a session. Requires Redis.
    * `POST /api/auth/sso`
    */
   sso(input?: OperationInput<'sso'>, options?: RequestOptions): Promise<OperationOutput<'sso'>> {

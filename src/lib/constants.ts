@@ -1,5 +1,4 @@
 export const CURRENT_VERSION = process.env.currentVersion;
-export const AUTH_TOKEN = 'umami.auth';
 export const LOCALE_CONFIG = 'umami.locale';
 export const TIMEZONE_CONFIG = 'umami.timezone';
 export const DATE_RANGE_CONFIG = 'umami.date-range';
@@ -14,8 +13,8 @@ export const SHARE_CONTEXT_HEADER = 'x-umami-share-context';
 export const SHARE_TOKEN_TYPE = 'share';
 export const CACHE_TOKEN_TYPE = 'cache';
 export const PARTIAL_AUTH_TOKEN_TYPE = 'partial-auth';
-// Lifetime of a Redis-backed auth session, refreshed on every authenticated
-// request so an active user is never signed out.
+export const CREDENTIAL_PROVIDER_ID = 'credential';
+// Lifetime of an auth session, counted from the sign-in.
 export const AUTH_SESSION_TTL = 60 * 60 * 24 * 30;
 export const HOMEPAGE_URL = 'https://umami.is';
 export const DOCS_URL = 'https://umami.is/docs';

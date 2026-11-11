@@ -12,10 +12,13 @@ datasource db {
 model User {
   id                String    @id() @map("user_id") @db.Uuid
   username          String    @unique @db.VarChar(255)
-  password          String    @db.VarChar(60)
+  password          String?   @db.VarChar(60)
   role              String    @map("role") @db.VarChar(50)
   logoUrl           String?   @map("logo_url") @db.VarChar(2183)
   displayName       String?   @map("display_name") @db.VarChar(255)
+  email             String    @unique @db.VarChar(320)
+  emailVerified     Boolean   @default(false) @map("email_verified")
+  displayUsername   String?   @map("display_username") @db.VarChar(255)
   twoFactorRequired Boolean   @default(false) @map("two_factor_required")
   createdAt         DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -33,8 +36,63 @@ model User {
   twoFactorOtpUseds    TwoFactorOtpUsed[]
   twoFactorRateLimit   TwoFactorRateLimit?
   apiKeys              ApiKey[]
+  accounts             Account[]
+  authSessions         AuthSession[]
 
   @@map("user")
+}
+
+// better-auth session. The analytics visitor table owns the "session" name.
+model AuthSession {
+  id             String   @id() @map("auth_session_id")
+  userId         String   @map("user_id") @db.Uuid
+  token          String   @unique
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  ipAddress      String?  @map("ip_address") @db.VarChar(100)
+  userAgent      String?  @map("user_agent")
+  twoFactorSetup Boolean? @map("two_factor_setup")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_session")
+}
+
+// better-auth account: one row per sign-in method (password or external provider).
+model Account {
+  id                    String    @id() @map("account_id")
+  userId                String    @map("user_id") @db.Uuid
+  accountId             String    @map("provider_account_id")
+  providerId            String    @map("provider_id")
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(6)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(6)
+  scope                 String?
+  idToken               String?   @map("id_token")
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id() @map("verification_id")
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([identifier])
+  @@map("verification")
 }
 
 model ApiKey {

@@ -69,7 +69,7 @@ export async function POST(request: Request) {
 
   // Verify password
   const userWithPw = await getUser(userId, { includePassword: true });
-  if (!userWithPw || !checkPassword(password, userWithPw.password)) {
+  if (!userWithPw?.password || !checkPassword(password, userWithPw.password)) {
     return badRequest({
       code: 'two-factor-error-incorrect-password',
       message: 'Incorrect password',

@@ -7,7 +7,6 @@ import {
   PasswordField,
 } from '@umami/react-zen';
 import { useMessages, useUpdateQuery } from '@/components/hooks';
-import { setClientAuthToken } from '@/lib/client';
 
 export function PasswordEditForm({
   onSave,
@@ -23,11 +22,8 @@ export function PasswordEditForm({
 
   const handleSubmit = async (data: any) => {
     await mutateAsync(data, {
-      onSuccess: async ({ token }) => {
-        // The old token stops working once the password changes. Older servers don't return a new one.
-        if (token) {
-          setClientAuthToken(token);
-        }
+      // Changing the password ends every session; the response sets a new session cookie.
+      onSuccess: async () => {
         onSave();
         onClose?.();
       },

@@ -2,9 +2,8 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getBearerToken: vi.fn(),
-  saveAuth: vi.fn(),
+  createUserSession: vi.fn(),
   parseSecureToken: vi.fn(),
-  createSecureToken: vi.fn(),
   getUser: vi.fn(),
   getAllUserTeams: vi.fn(),
   findTwoFactorAuth: vi.fn(),
@@ -18,21 +17,21 @@ const mocks = vi.hoisted(() => ({
   claimOtp: vi.fn(),
   verifyTotp: vi.fn(),
   secret: vi.fn(),
-  hash: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({
   getBearerToken: mocks.getBearerToken,
-  saveAuth: mocks.saveAuth,
+}));
+
+vi.mock('@/lib/auth-server', () => ({
+  createUserSession: mocks.createUserSession,
 }));
 
 vi.mock('@/lib/crypto', () => ({
   secret: mocks.secret,
-  hash: mocks.hash,
 }));
 
 vi.mock('@/lib/jwt', () => ({
-  createSecureToken: mocks.createSecureToken,
   parseSecureToken: mocks.parseSecureToken,
 }));
 
@@ -81,19 +80,12 @@ vi.mock('@/lib/two-factor/totp', () => ({
   verifyTotp: mocks.verifyTotp,
 }));
 
-vi.mock('@/lib/redis', () => ({
-  default: {
-    enabled: false,
-  },
-}));
-
 import { POST } from './route';
 
 beforeEach(() => {
   mocks.getBearerToken.mockReset();
-  mocks.saveAuth.mockReset();
+  mocks.createUserSession.mockReset();
   mocks.parseSecureToken.mockReset();
-  mocks.createSecureToken.mockReset();
   mocks.getUser.mockReset();
   mocks.getAllUserTeams.mockReset();
   mocks.findTwoFactorAuth.mockReset();
@@ -107,11 +99,9 @@ beforeEach(() => {
   mocks.claimOtp.mockReset();
   mocks.verifyTotp.mockReset();
   mocks.secret.mockReset();
-  mocks.hash.mockReset();
 
   mocks.getBearerToken.mockReturnValue('partial-token');
   mocks.secret.mockReturnValue('app-secret');
-  mocks.hash.mockReturnValue('pwd-fingerprint');
   mocks.parseSecureToken.mockReturnValue({ type: 'partial-auth', userId: 'user-1' });
   mocks.getUser.mockResolvedValue({
     id: 'user-1',
@@ -126,7 +116,10 @@ beforeEach(() => {
     isEnabled: true,
     secret: 'encrypted',
   });
-  mocks.createSecureToken.mockReturnValue('full-auth-token');
+  mocks.createUserSession.mockResolvedValue({
+    token: 'full-auth-token',
+    headers: new Headers({ 'set-cookie': 'umami.session_token=full-auth-token' }),
+  });
   mocks.decryptSecret.mockReturnValue('plain-secret');
   mocks.isTwoFactorConfigured.mockReturnValue(true);
   mocks.reserveAttempt.mockResolvedValue({ allowed: true });
@@ -153,12 +146,9 @@ test('POST accepts a token-only payload and completes 2FA verification', async (
   expect(mocks.verifyTotp).toHaveBeenCalledWith('123456', 'plain-secret');
   expect(mocks.claimOtp).toHaveBeenCalledWith('user-1', '123456');
   expect(mocks.resetRateLimit).toHaveBeenCalledWith('user-1');
-  // Full session must not carry the partial-auth type and must be bound to the password.
-  expect(mocks.hash).toHaveBeenCalledWith('$2b$10$hashedpassword');
-  expect(mocks.createSecureToken).toHaveBeenCalledWith(
-    { userId: 'user-1', role: 'admin', pwd: 'pwd-fingerprint' },
-    'app-secret',
-  );
+  // The full session replaces the partial token: as a cookie and as a bearer token.
+  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1');
+  expect(response.headers.get('set-cookie')).toBe('umami.session_token=full-auth-token');
   const data = await response.json();
   expect(data).toMatchObject({
     token: 'full-auth-token',
@@ -214,8 +204,7 @@ test('POST rejects a valid code another request already claimed, without minting
     error: { code: 'two-factor-error-code-used' },
   });
   expect(response.status).toBe(400);
-  expect(mocks.createSecureToken).not.toHaveBeenCalled();
-  expect(mocks.saveAuth).not.toHaveBeenCalled();
+  expect(mocks.createUserSession).not.toHaveBeenCalled();
   expect(mocks.resetRateLimit).not.toHaveBeenCalled();
 });
 
@@ -242,5 +231,5 @@ test('POST does not check the code when no attempt can be reserved', async () =>
   });
   expect(mocks.verifyTotp).not.toHaveBeenCalled();
   expect(mocks.verifyBackupCode).not.toHaveBeenCalled();
-  expect(mocks.createSecureToken).not.toHaveBeenCalled();
+  expect(mocks.createUserSession).not.toHaveBeenCalled();
 });

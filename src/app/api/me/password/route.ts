@@ -1,10 +1,9 @@
 import { z } from 'zod';
-import { createSessionToken } from '@/lib/auth';
-import { checkPassword, hashPassword } from '@/lib/password';
-import redis from '@/lib/redis';
+import { createUserSession, revokeUserSessions, setUserPassword } from '@/lib/auth-server';
+import { checkPassword } from '@/lib/password';
 import { parseRequest } from '@/lib/request';
 import { badRequest, json, notFound } from '@/lib/response';
-import { getUser, updateUser } from '@/queries/prisma/user';
+import { getUser } from '@/queries/prisma/user';
 
 export async function POST(request: Request) {
   const schema = z.object({
@@ -27,20 +26,18 @@ export async function POST(request: Request) {
     return notFound();
   }
 
-  if (!checkPassword(currentPassword, user.password)) {
+  if (!user.password || !checkPassword(currentPassword, user.password)) {
     return badRequest({ message: 'Current password is incorrect' });
   }
 
-  const password = hashPassword(newPassword);
+  await setUserPassword(userId, newPassword);
 
-  const updated = await updateUser(userId, { password });
+  // The new password ends every existing session, so keep this user signed in with a new one.
+  await revokeUserSessions(userId);
 
-  // The new password invalidates every existing session, so keep this user signed in with a new one.
-  const token = await createSessionToken({ id: userId, role: user.role, password });
+  const { token, headers } = await createUserSession(request, userId);
 
-  if (redis.enabled && auth.authKey) {
-    await redis.client.del(auth.authKey);
-  }
+  const { id, username, role, createdAt } = user;
 
-  return json({ ...updated, token });
+  return json({ id, username, role, createdAt, token }, { headers });
 }

@@ -12,7 +12,7 @@ const operation1 = defineOperation({
     operationId: 'sso',
     summary: 'Create a single sign-on token',
     description:
-      'Returns the authenticated user and a new token valid for 24 hours. Requires Redis-backed authentication.',
+      'Returns the authenticated user and a single-use token valid for two minutes, which the /sso page exchanges for a session. Requires Redis.',
     tags: ['Authentication'],
     responses: {
       '200': {
@@ -25,9 +25,7 @@ const operation1 = defineOperation({
                 user: {
                   description: 'User associated with the resource.',
                 },
-                token: {
-                  type: 'string',
-                },
+                token: {},
               },
               required: ['user', 'token'],
             },

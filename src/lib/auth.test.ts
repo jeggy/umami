@@ -1,21 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { AUTH_SESSION_TTL } from '@/lib/constants';
-import { hash } from '@/lib/crypto';
-import { createSecureToken, parseSecureToken, parseToken } from '@/lib/jwt';
-import redis from '@/lib/redis';
+import { parseToken } from '@/lib/jwt';
 import { getApiKeyByHash, updateApiKeyLastUsed } from '@/queries/prisma/apiKey';
 import { getShare } from '@/queries/prisma/share';
 import { getUser } from '@/queries/prisma/user';
 import { hashApiKey } from './api-key';
-import { checkAuth, createSessionToken } from './auth';
+import { checkAuth } from './auth';
 
 vi.hoisted(() => {
   process.env.APP_SECRET ??= 'test-app-secret';
 });
 
+const getSessionMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/auth-server', () => ({
+  getAuth: () => ({ api: { getSession: getSessionMock } }),
+}));
+
 vi.mock('@/lib/jwt', () => ({
-  createSecureToken: vi.fn(),
-  parseSecureToken: vi.fn(),
   parseToken: vi.fn(() => null),
 }));
 
@@ -44,38 +45,24 @@ vi.mock('@/lib/prisma', () => ({
   },
 }));
 
-vi.mock('@/lib/redis', () => ({
-  default: {
-    enabled: false,
-    client: {
-      get: vi.fn(),
-      set: vi.fn(),
-      expire: vi.fn().mockResolvedValue(true),
-    },
-  },
-}));
-
-const createSecureTokenMock = vi.mocked(createSecureToken);
-const parseSecureTokenMock = vi.mocked(parseSecureToken);
 const parseTokenMock = vi.mocked(parseToken);
 const getShareMock = vi.mocked(getShare);
 const getUserMock = vi.mocked(getUser);
 const getApiKeyByHashMock = vi.mocked(getApiKeyByHash);
 const updateApiKeyLastUsedMock = vi.mocked(updateApiKeyLastUsed);
-const redisMock = redis as unknown as {
-  enabled: boolean;
-  client: {
-    get: ReturnType<typeof vi.fn>;
-    set: ReturnType<typeof vi.fn>;
-    expire: ReturnType<typeof vi.fn>;
-  };
-};
 
 const PASSWORD_HASH = '$2b$10$currentpasswordhashvalue';
 
 function authedRequest() {
   return new Request('http://localhost/api/test', {
-    headers: { authorization: 'Bearer secure-token' },
+    headers: { authorization: 'Bearer session-token' },
+  });
+}
+
+function mockSession(session: Record<string, unknown> = {}, userId = 'user-1') {
+  getSessionMock.mockResolvedValue({
+    session: { token: 'session-token', userId, ...session },
+    user: { id: userId },
   });
 }
 
@@ -92,19 +79,14 @@ function mockUser(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.unstubAllEnvs();
   vi.stubEnv('CLOUD_MODE', '');
-  parseSecureTokenMock.mockReset();
+  getSessionMock.mockReset();
+  getSessionMock.mockResolvedValue(null);
   parseTokenMock.mockReset();
   parseTokenMock.mockReturnValue(null);
   getShareMock.mockReset();
   getUserMock.mockReset();
   getApiKeyByHashMock.mockReset();
   updateApiKeyLastUsedMock.mockClear();
-  redisMock.enabled = false;
-  redisMock.client.get.mockReset();
-  redisMock.client.set.mockReset();
-  createSecureTokenMock.mockReset();
-  redisMock.client.expire.mockReset();
-  redisMock.client.expire.mockResolvedValue(true);
   prismaMocks.findTwoFactorAuth.mockReset();
 });
 
@@ -139,7 +121,7 @@ describe('checkAuth api keys', () => {
     expect(result?.user?.id).toBe('user-1');
     expect(result?.user).not.toHaveProperty('password');
     expect(result?.apiKey).toEqual({ id: 'key-1', name: 'CI' });
-    expect(parseSecureTokenMock).not.toHaveBeenCalled();
+    expect(getSessionMock).not.toHaveBeenCalled();
   });
 
   test('rejects an unknown api key', async () => {
@@ -183,13 +165,12 @@ describe('checkAuth api keys', () => {
     vi.stubEnv('CLOUD_MODE', '1');
     mockApiKey();
     mockUser();
-    parseSecureTokenMock.mockReturnValue(null);
 
     const result = await checkAuth(apiKeyRequest());
 
     expect(result).toBeNull();
     expect(getApiKeyByHashMock).not.toHaveBeenCalled();
-    expect(parseSecureTokenMock).toHaveBeenCalled();
+    expect(getSessionMock).toHaveBeenCalled();
   });
 
   test('updates lastUsedAt when stale', async () => {
@@ -210,8 +191,8 @@ describe('checkAuth api keys', () => {
     expect(updateApiKeyLastUsedMock).not.toHaveBeenCalled();
   });
 
-  test('does not treat a jwt as an api key', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1' } as any);
+  test('does not treat a session token as an api key', async () => {
+    mockSession();
     mockUser();
 
     const result = await checkAuth(authedRequest());
@@ -221,11 +202,22 @@ describe('checkAuth api keys', () => {
   });
 });
 
-describe('checkAuth 2FA partial token', () => {
-  // GHSA-vj8c-fvjv-rpg2: the partial token issued after the password step of a
-  // 2FA login must not be usable as a session on protected routes.
-  test('rejects a partial-auth token on a protected route', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', type: 'partial-auth' } as any);
+describe('checkAuth sessions', () => {
+  test('authorizes a request that carries a session', async () => {
+    mockSession();
+    mockUser();
+
+    const result = await checkAuth(authedRequest());
+
+    expect(getSessionMock).toHaveBeenCalledWith({ headers: expect.any(Headers) });
+    expect(result?.user?.id).toBe('user-1');
+    expect(result?.authType).toBe('session');
+    expect(result?.token).toBe('session-token');
+  });
+
+  test('rejects a request without a session', async () => {
+    // Covers a missing cookie, an unknown bearer value and a session that was revoked, for
+    // example by a password change.
     mockUser();
 
     const result = await checkAuth(authedRequest());
@@ -234,65 +226,48 @@ describe('checkAuth 2FA partial token', () => {
     expect(getUserMock).not.toHaveBeenCalled();
   });
 
-  test('rejects a partial-auth token even when it carries a matching password fingerprint', async () => {
-    parseSecureTokenMock.mockReturnValue({
-      userId: 'user-1',
-      type: 'partial-auth',
-      pwd: hash(PASSWORD_HASH),
-    } as any);
-    mockUser();
+  test('rejects a session whose user has been deleted', async () => {
+    // getUser filters soft-deleted users, whose sessions may still exist.
+    mockSession();
+    getUserMock.mockResolvedValue(null);
 
-    const result = await checkAuth(authedRequest());
-
-    expect(result).toBeNull();
+    expect(await checkAuth(authedRequest())).toBeNull();
   });
 
-  test('rejects a partial-auth token in Redis mode', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', type: 'partial-auth' } as any);
-    mockUser();
+  test('rejects the request when the session lookup fails', async () => {
+    getSessionMock.mockRejectedValue(new Error('storage unavailable'));
 
-    const result = await checkAuth(authedRequest());
-
-    expect(result).toBeNull();
-    expect(redisMock.client.get).not.toHaveBeenCalled();
-  });
-});
-
-describe('checkAuth password fingerprint', () => {
-  test('authorizes a stateless token whose fingerprint matches the current password', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', pwd: hash(PASSWORD_HASH) } as any);
-    mockUser();
-
-    const result = await checkAuth(authedRequest());
-
-    expect(result?.user?.id).toBe('user-1');
+    expect(await checkAuth(authedRequest())).toBeNull();
   });
 
-  test('authorizes a legacy stateless token that does not include a password fingerprint', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1' } as any);
+  test('ignores the session cookie on a state-changing request from another site', async () => {
+    mockSession();
     mockUser();
 
-    const result = await checkAuth(authedRequest());
+    const request = (site: string, method = 'POST', headers = {}) =>
+      new Request('http://localhost/api/test', {
+        method,
+        headers: {
+          cookie: 'umami.session_token=session-token',
+          'sec-fetch-site': site,
+          ...headers,
+        },
+      });
 
-    expect(result?.user?.id).toBe('user-1');
-  });
+    expect(await checkAuth(request('same-site'))).toBeNull();
+    expect(await checkAuth(request('cross-site'))).toBeNull();
+    expect(getSessionMock).not.toHaveBeenCalled();
 
-  test('rejects a stateless token whose fingerprint predates a password change', async () => {
-    // Token minted against the old password must stop working once the password changes.
-    parseSecureTokenMock.mockReturnValue({
-      userId: 'user-1',
-      pwd: hash('old-password-hash'),
-    } as any);
-    mockUser();
-
-    const result = await checkAuth(authedRequest());
-
-    expect(result).toBeNull();
+    expect(await checkAuth(request('same-origin'))).not.toBeNull();
+    expect(await checkAuth(request('cross-site', 'GET'))).not.toBeNull();
+    // A bearer token is never sent by the browser on its own.
+    expect(
+      await checkAuth(request('cross-site', 'POST', { authorization: 'Bearer session-token' })),
+    ).not.toBeNull();
   });
 
   test('does not expose the password hash on the returned user', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', pwd: hash(PASSWORD_HASH) } as any);
+    mockSession();
     mockUser();
 
     const result = await checkAuth(authedRequest());
@@ -303,106 +278,12 @@ describe('checkAuth password fingerprint', () => {
   test('marks a session that must change its seeded password', async () => {
     const systemUserId = '41e2b680-648e-4b09-bcd7-3e2b10c06264';
     const systemUserPasswordHash = '$2b$10$BUli0c.muyCW1ErNJc3jL.vFRFtFJWrT8/GcR4A.sUdCznaXiqFXa';
-    parseSecureTokenMock.mockReturnValue({
-      userId: systemUserId,
-      pwd: hash(systemUserPasswordHash),
-    } as any);
+    mockSession({}, systemUserId);
     mockUser({ id: systemUserId, password: systemUserPasswordHash });
 
     const result: any = await checkAuth(authedRequest());
 
     expect(result?.passwordChangeRequired).toBe(true);
-  });
-
-  test('authorizes a Redis session whose fingerprint matches the current password', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({ userId: 'user-1', pwd: hash(PASSWORD_HASH) });
-    mockUser();
-
-    const result = await checkAuth(authedRequest());
-
-    expect(result?.user?.id).toBe('user-1');
-  });
-
-  test('rejects a Redis session whose fingerprint predates a password change', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({ userId: 'user-1', pwd: hash('old-password-hash') });
-    mockUser();
-
-    const result = await checkAuth(authedRequest());
-
-    expect(result).toBeNull();
-  });
-
-  test('refreshes the session TTL so an active user is not signed out', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({
-      userId: 'user-1',
-      pwd: hash(PASSWORD_HASH),
-      ttl: AUTH_SESSION_TTL,
-    });
-    mockUser();
-
-    await checkAuth(authedRequest());
-
-    expect(redisMock.client.expire).toHaveBeenCalledWith('auth:session-key', AUTH_SESSION_TTL);
-  });
-
-  test('leaves a session stored without a window at its original expiry', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({ userId: 'user-1', pwd: hash(PASSWORD_HASH) });
-    mockUser();
-
-    const result = await checkAuth(authedRequest());
-
-    expect(result?.user?.id).toBe('user-1');
-    expect(redisMock.client.expire).not.toHaveBeenCalled();
-  });
-
-  test('refreshes using the window the session was created with', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({
-      userId: 'user-1',
-      pwd: hash(PASSWORD_HASH),
-      ttl: 86400,
-    });
-    mockUser();
-
-    await checkAuth(authedRequest());
-
-    expect(redisMock.client.expire).toHaveBeenCalledWith('auth:session-key', 86400);
-  });
-
-  test('does not refresh the TTL of a session rejected by a password change', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({ userId: 'user-1', pwd: hash('old-password-hash') });
-    mockUser();
-
-    await checkAuth(authedRequest());
-
-    expect(redisMock.client.expire).not.toHaveBeenCalled();
-  });
-
-  test('still authorizes when refreshing the TTL fails', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({
-      userId: 'user-1',
-      pwd: hash(PASSWORD_HASH),
-      ttl: AUTH_SESSION_TTL,
-    });
-    redisMock.client.expire.mockRejectedValue(new Error('redis down'));
-    mockUser();
-
-    const result = await checkAuth(authedRequest());
-
-    expect(result?.user?.id).toBe('user-1');
   });
 });
 
@@ -472,11 +353,7 @@ describe('checkAuth required 2FA setup', () => {
   test('flags a session issued before required 2FA was set up', async () => {
     // Without this flag a password alone would grant full access to accounts the admin requires
     // to use 2FA; parseRequest uses it to limit the session to the setup routes.
-    parseSecureTokenMock.mockReturnValue({
-      userId: 'user-1',
-      pwd: hash(PASSWORD_HASH),
-      twoFactorSetup: true,
-    } as any);
+    mockSession({ twoFactorSetup: true });
     mockUser();
     prismaMocks.findTwoFactorAuth.mockResolvedValue(null);
 
@@ -487,7 +364,7 @@ describe('checkAuth required 2FA setup', () => {
   });
 
   test('keeps a setup that was started but not confirmed restricted', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', twoFactorSetup: true } as any);
+    mockSession({ twoFactorSetup: true });
     mockUser();
     prismaMocks.findTwoFactorAuth.mockResolvedValue({ isEnabled: false });
 
@@ -496,8 +373,8 @@ describe('checkAuth required 2FA setup', () => {
     expect(result?.twoFactorSetupPending).toBe(true);
   });
 
-  test('lifts the restriction on the same token once 2FA is enabled', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', twoFactorSetup: true } as any);
+  test('lifts the restriction on the same session once 2FA is enabled', async () => {
+    mockSession({ twoFactorSetup: true });
     mockUser();
     prismaMocks.findTwoFactorAuth.mockResolvedValue({ isEnabled: true });
 
@@ -506,70 +383,13 @@ describe('checkAuth required 2FA setup', () => {
     expect(result?.twoFactorSetupPending).toBe(false);
   });
 
-  test('flags a Redis session issued before required 2FA was set up', async () => {
-    redisMock.enabled = true;
-    parseSecureTokenMock.mockReturnValue({ authKey: 'auth:session-key' } as any);
-    redisMock.client.get.mockResolvedValue({
-      userId: 'user-1',
-      pwd: hash(PASSWORD_HASH),
-      twoFactorSetup: true,
-    });
-    mockUser();
-    prismaMocks.findTwoFactorAuth.mockResolvedValue(null);
-
-    const result: any = await checkAuth(authedRequest());
-
-    expect(result?.twoFactorSetupPending).toBe(true);
-  });
-
   test('does not look up 2FA for ordinary sessions', async () => {
-    parseSecureTokenMock.mockReturnValue({ userId: 'user-1', pwd: hash(PASSWORD_HASH) } as any);
+    mockSession();
     mockUser();
 
     const result: any = await checkAuth(authedRequest());
 
     expect(result?.twoFactorSetupPending).toBe(false);
     expect(prismaMocks.findTwoFactorAuth).not.toHaveBeenCalled();
-  });
-});
-
-describe('createSessionToken', () => {
-  const NEW_PASSWORD_HASH = '$2b$10$newpasswordhashvalue';
-
-  test('issues a stateless session that checkAuth accepts until the password changes again', async () => {
-    // Issued after a password change so the user stays signed in; it must still be cut off by
-    // the next password change like any other session.
-    createSecureTokenMock.mockImplementation(payload => payload as any);
-
-    const session: any = await createSessionToken({
-      id: 'user-1',
-      role: 'user',
-      password: NEW_PASSWORD_HASH,
-    });
-
-    parseSecureTokenMock.mockReturnValue(session);
-    mockUser({ password: NEW_PASSWORD_HASH });
-    expect((await checkAuth(authedRequest()))?.user?.id).toBe('user-1');
-
-    mockUser({ password: '$2b$10$passwordchangedagain' });
-    expect(await checkAuth(authedRequest())).toBeNull();
-  });
-
-  test('stores a Redis session bound to the new password', async () => {
-    redisMock.enabled = true;
-    createSecureTokenMock.mockReturnValue('redis-session-token' as any);
-
-    const token = await createSessionToken({
-      id: 'user-1',
-      role: 'user',
-      password: NEW_PASSWORD_HASH,
-    });
-
-    expect(token).toBe('redis-session-token');
-    expect(redisMock.client.set).toHaveBeenCalledWith(
-      expect.stringMatching(/^auth:/),
-      expect.objectContaining({ userId: 'user-1', role: 'user', pwd: hash(NEW_PASSWORD_HASH) }),
-      AUTH_SESSION_TTL,
-    );
   });
 });

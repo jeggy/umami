@@ -111,6 +111,10 @@ const operation2 = defineOperation({
             schema: {
               type: 'object',
               properties: {
+                password: {
+                  type: 'string',
+                  description: 'Password used to authenticate the account.',
+                },
                 twoFactorAuth: {
                   type: 'object',
                   properties: {
@@ -181,10 +185,6 @@ const operation2 = defineOperation({
                 username: {
                   type: 'string',
                   description: 'Username of the account.',
-                },
-                password: {
-                  type: 'string',
-                  description: 'Password used to authenticate the account.',
                 },
                 role: {
                   type: 'string',
@@ -914,6 +914,60 @@ const operation2 = defineOperation({
                   },
                   description: 'API keys associated with the user.',
                 },
+                authSessions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                        description: 'Unique identifier of the resource.',
+                      },
+                      userId: {
+                        type: 'string',
+                        description: 'ID of the associated user.',
+                      },
+                      createdAt: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Date and time the record was created.',
+                      },
+                      updatedAt: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Date and time the record was last updated.',
+                      },
+                      expiresAt: {
+                        type: 'string',
+                        format: 'date-time',
+                        description: 'Date and time the credential expires.',
+                      },
+                      token: {
+                        type: 'string',
+                      },
+                      ipAddress: {
+                        type: 'string',
+                      },
+                      userAgent: {
+                        type: 'string',
+                      },
+                      twoFactorSetup: {
+                        type: 'boolean',
+                      },
+                    },
+                    required: [
+                      'id',
+                      'userId',
+                      'createdAt',
+                      'updatedAt',
+                      'expiresAt',
+                      'token',
+                      'ipAddress',
+                      'userAgent',
+                      'twoFactorSetup',
+                    ],
+                  },
+                },
                 _count: {
                   type: 'object',
                   properties: {
@@ -960,6 +1014,12 @@ const operation2 = defineOperation({
                       type: 'number',
                       description: 'API keys associated with the user.',
                     },
+                    accounts: {
+                      type: 'number',
+                    },
+                    authSessions: {
+                      type: 'number',
+                    },
                   },
                   required: [
                     'websites',
@@ -974,16 +1034,18 @@ const operation2 = defineOperation({
                     'twoFactorOtpUseds',
                     'twoFactorRateLimit',
                     'apiKeys',
+                    'accounts',
+                    'authSessions',
                   ],
                 },
               },
               required: [
+                'password',
                 'twoFactorAuth',
                 'twoFactorRateLimit',
                 'id',
                 'createdAt',
                 'username',
-                'password',
                 'role',
                 'twoFactorRequired',
                 'websites',
@@ -996,6 +1058,7 @@ const operation2 = defineOperation({
                 'twoFactorBackupCodes',
                 'twoFactorOtpUseds',
                 'apiKeys',
+                'authSessions',
                 '_count',
               ],
             },

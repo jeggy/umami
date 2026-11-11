@@ -51,6 +51,48 @@ class UmamiRedisClient {
     return this.client.set(key, JSON.stringify(value), { EX: ttl });
   }
 
+  // The raw helpers skip the JSON encoding and the default TTL: better-auth
+  // stores plain strings and writes some keys without an expiry.
+  async getRaw(key: string) {
+    await this.connect();
+
+    return this.client.get(key);
+  }
+
+  async setRaw(key: string, value: string, ttl?: number) {
+    await this.connect();
+
+    return ttl && ttl > 0 ? this.client.set(key, value, { EX: ttl }) : this.client.set(key, value);
+  }
+
+  async getDelRaw(key: string) {
+    await this.connect();
+
+    return this.client.getDel(key);
+  }
+
+  // The TTL is set only when the key is created, so the counter expires a
+  // fixed window after its first increment.
+  async incrWithTtl(key: string, ttl: number) {
+    await this.connect();
+
+    const value = await this.client.incr(key);
+
+    if (value === 1) {
+      await this.client.expire(key, ttl);
+    }
+
+    return value;
+  }
+
+  async setNX(key: string, value: string, ttl: number) {
+    await this.connect();
+
+    const result = await this.client.set(key, value, { NX: true, EX: ttl });
+
+    return result === 'OK';
+  }
+
   async del(key: string) {
     await this.connect();
 

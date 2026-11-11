@@ -6,20 +6,18 @@ import {
   isApiKeyBlockedPath,
   isApiKeyEnabled,
 } from '@/lib/api-key';
+import { getAuth } from '@/lib/auth-server';
 import {
-  AUTH_SESSION_TTL,
-  PARTIAL_AUTH_TOKEN_TYPE,
   ROLE_PERMISSIONS,
   ROLES,
   SHARE_CONTEXT_HEADER,
   SHARE_TOKEN_HEADER,
   SHARE_TOKEN_TYPE,
 } from '@/lib/constants';
-import { createAuthKey, hash, secret } from '@/lib/crypto';
-import { createSecureToken, parseSecureToken, parseToken } from '@/lib/jwt';
+import { secret } from '@/lib/crypto';
+import { parseToken } from '@/lib/jwt';
 import { hasDefaultPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
-import redis from '@/lib/redis';
 import { ensureArray } from '@/lib/utils';
 import { getApiKeyByHash, updateApiKeyLastUsed } from '@/queries/prisma/apiKey';
 import { getShare } from '@/queries/prisma/share';
@@ -72,6 +70,40 @@ export async function checkApiKeyAuth(request: Request, token: string) {
   };
 }
 
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+
+/**
+ * The browser attaches the session cookie by itself, so a request that changes state has to come
+ * from Umami's own pages. Browsers report where a request came from in Sec-Fetch-Site. Clients
+ * that send the token as a bearer header are not affected.
+ */
+function isCrossSiteRequest(request: Request) {
+  const site = request.headers.get('sec-fetch-site');
+
+  return (
+    !getBearerToken(request) &&
+    !SAFE_METHODS.includes(request.method) &&
+    !!site &&
+    site !== 'same-origin' &&
+    site !== 'none'
+  );
+}
+
+/** Reads the better-auth session of a request, from its cookie or bearer token. */
+async function getAuthSession(request: Request) {
+  if (isCrossSiteRequest(request)) {
+    log('Cross-site request rejected');
+    return null;
+  }
+
+  try {
+    return await getAuth().api.getSession({ headers: request.headers });
+  } catch (e) {
+    log(e);
+    return null;
+  }
+}
+
 export async function checkAuth(request: Request) {
   const token = getBearerToken(request);
 
@@ -79,55 +111,21 @@ export async function checkAuth(request: Request) {
     return checkApiKeyAuth(request, token);
   }
 
-  const payload = parseSecureToken(token, secret());
-
-  // The partial token issued after the password step of a 2FA login only proves
-  // knowledge of the password. It must never be accepted as a session; it is
-  // only valid for completing the challenge at /api/2fa/verify.
-  if (payload?.type === PARTIAL_AUTH_TOKEN_TYPE) {
-    log('Partial auth token rejected');
-    return null;
-  }
-
+  const session = await getAuthSession(request);
   const shareToken = await parseShareToken(request);
 
   let user = null;
   let twoFactorSetup = false;
-  const { userId, authKey } = payload || {};
 
-  if (userId) {
-    user = await getUser(userId, { includePassword: true });
-    twoFactorSetup = !!payload.twoFactorSetup;
-
-    // Reject tokens issued before the current password.
-    // Allow legacy stateless tokens that were minted without a password fingerprint.
-    if (user && payload.pwd && hash(user.password) !== payload.pwd) {
-      user = null;
-    }
-  } else if (redis.enabled && authKey) {
-    const key = await redis.client.get(authKey);
-
-    if (key?.userId) {
-      user = await getUser(key.userId, { includePassword: true });
-      twoFactorSetup = !!key.twoFactorSetup;
-
-      // Only enforce password-change invalidation for sessions that include a password fingerprint.
-      if (user && key.pwd && hash(user.password) !== key.pwd) {
-        user = null;
-      }
-
-      // Keep an in-use session alive rather than expiring it a fixed time after
-      // login, reusing the window it was created with. Sessions stored before
-      // this was recorded are left alone: their intended lifetime is unknown,
-      // and defaulting would extend the shorter ones past it.
-      if (user && key.ttl) {
-        await redis.client.expire(authKey, key.ttl).catch(e => log(e));
-      }
-    }
+  if (session?.user?.id) {
+    // Re-read through Umami's own query: it filters soft-deleted users and
+    // returns the user shape the routes and permissions expect.
+    user = await getUser(session.user.id, { includePassword: true });
+    twoFactorSetup = !!(session.session as { twoFactorSetup?: boolean }).twoFactorSetup;
   }
 
   // A session issued while 2FA was required but not set up stays restricted until enrollment
-  // completes; after that the same token becomes a full session.
+  // completes; after that the same session becomes a full session.
   let twoFactorSetupPending = false;
 
   if (user && twoFactorSetup) {
@@ -136,9 +134,7 @@ export async function checkAuth(request: Request) {
   }
 
   log({
-    hasToken: !!token,
-    hasPayload: !!payload,
-    hasAuthKey: !!authKey,
+    hasSession: !!session,
     hasShareToken: !!shareToken,
     userId: user?.id,
   });
@@ -164,34 +160,13 @@ export async function checkAuth(request: Request) {
   }
 
   return {
-    token,
-    authKey,
+    token: user ? session.session.token : undefined,
     shareToken,
     user,
     authType: user ? ('session' as const) : ('share' as const),
     twoFactorSetupPending,
     passwordChangeRequired,
   };
-}
-
-export async function saveAuth(data: any, expire = AUTH_SESSION_TTL) {
-  const authKey = `auth:${createAuthKey()}`;
-
-  if (redis.enabled) {
-    // The TTL must be passed to set(): the client falls back to its own short
-    // DEFAULT_TTL when called without one, which would expire the session.
-    // It is stored alongside the session so refreshes can reuse the same window.
-    await redis.client.set(authKey, { ...data, ttl: expire }, expire);
-  }
-
-  return createSecureToken({ authKey }, secret());
-}
-
-export async function createSessionToken(user: { id: string; role: string; password: string }) {
-  // Bind token to password hash so a password change invalidates old tokens.
-  const session = { userId: user.id, role: user.role, pwd: hash(user.password) };
-
-  return redis.enabled ? saveAuth(session) : createSecureToken(session, secret());
 }
 
 export async function hasPermission(role: string, permission: string | string[]) {

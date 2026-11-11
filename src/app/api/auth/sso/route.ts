@@ -1,9 +1,9 @@
-import { saveAuth } from '@/lib/auth';
-import { hash } from '@/lib/crypto';
+import { SSO_TOKEN_TTL, SSO_TOKEN_TYPE } from '@/lib/auth-plugins/sso-token';
+import { secret, uuid } from '@/lib/crypto';
+import { createToken } from '@/lib/jwt';
 import redis from '@/lib/redis';
 import { parseRequest } from '@/lib/request';
 import { json, serverError } from '@/lib/response';
-import { getUser } from '@/queries/prisma';
 
 export async function POST(request: Request) {
   const { auth, error } = await parseRequest(request);
@@ -16,8 +16,11 @@ export async function POST(request: Request) {
     return serverError('Redis is disabled');
   }
 
-  const user = await getUser(auth.user.id, { includePassword: true });
-  const token = await saveAuth({ userId: auth.user.id, pwd: hash(user.password) }, 86400);
+  // A short-lived, single-use token. The /sso page exchanges it for a session
+  // at POST /api/auth/sso/verify.
+  const token = createToken({ userId: auth.user.id, type: SSO_TOKEN_TYPE, jti: uuid() }, secret(), {
+    expiresIn: SSO_TOKEN_TTL,
+  });
 
   return json({ user: auth.user, token });
 }

@@ -11,8 +11,7 @@ const operation1 = defineOperation({
   operation: {
     operationId: 'logout',
     summary: 'Log out',
-    description:
-      'Ends the current authentication session by removing its stored token when Redis-backed sessions are enabled.',
+    description: 'Ends the current authentication session and clears its cookie.',
     tags: ['Authentication'],
     responses: {
       '200': {
@@ -23,7 +22,7 @@ const operation1 = defineOperation({
               type: 'object',
               properties: {
                 ok: {
-                  const: true,
+                  type: 'boolean',
                   description: 'Whether the operation succeeded.',
                 },
               },

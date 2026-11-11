@@ -39,14 +39,9 @@ export async function loginViaApi(
   };
 }
 
-export async function loginPage(page: Page, request: APIRequestContext): Promise<Auth> {
-  const auth = await loginViaApi(request);
-
-  await page.addInitScript(token => {
-    window.localStorage.setItem('umami.auth', JSON.stringify(token));
-  }, auth.token);
-
-  return auth;
+export async function loginPage(page: Page, _request?: APIRequestContext): Promise<Auth> {
+  // Signing in through the page's own request context puts the session cookie in the browser.
+  return loginViaApi(page.context().request);
 }
 
 export async function logout(page: Page) {

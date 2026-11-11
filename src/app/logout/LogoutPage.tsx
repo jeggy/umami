@@ -1,25 +1,22 @@
 'use client';
-import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useApi } from '@/components/hooks';
-import { removeClientAuthToken } from '@/lib/client';
 import { setUser } from '@/store/app';
 
 export function LogoutPage() {
-  const router = useRouter();
   const { post } = useApi();
 
   useEffect(() => {
     async function logout() {
-      await post('/auth/logout');
+      await post('/auth/logout').catch(() => undefined);
+
+      setUser(null);
 
       window.location.href = `${process.env.basePath || ''}/login`;
     }
 
-    removeClientAuthToken();
-    setUser(null);
     logout();
-  }, [router, post]);
+  }, [post]);
 
   return null;
 }

@@ -1,15 +1,12 @@
-import { saveAuth } from '@/lib/auth';
-import { PARTIAL_AUTH_TOKEN_TYPE, ROLES } from '@/lib/constants';
-import { hash, secret } from '@/lib/crypto';
-import { createSecureToken } from '@/lib/jwt';
+import { createUserSession } from '@/lib/auth-server';
+import { ROLES } from '@/lib/constants';
 import { addTeamBillingStatus } from '@/lib/load';
 import { checkPassword, hasDefaultPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
-import redis from '@/lib/redis';
 import { parseRequest } from '@/lib/request';
 import { json, serviceUnavailable, unauthorized } from '@/lib/response';
 import { getTwoFactorConfigurationError, isTwoFactorConfigured } from '@/lib/two-factor/crypto';
-import { getTwoFactorRequiredReason } from '@/lib/two-factor/policy';
+import { createPartialToken } from '@/lib/two-factor/partial-token';
 import { getAllUserTeams, getUserByUsername } from '@/queries/prisma';
 import { loginRequestSchema } from './schema';
 
@@ -24,7 +21,8 @@ export async function POST(request: Request) {
 
   const user = await getUserByUsername(username, { includePassword: true });
 
-  if (!user || !checkPassword(password, user.password)) {
+  // Users without a password sign in through an external provider only.
+  if (!user?.password || !checkPassword(password, user.password)) {
     return unauthorized({ code: 'incorrect-username-password' });
   }
 
@@ -42,43 +40,27 @@ export async function POST(request: Request) {
       return serviceUnavailable(getTwoFactorConfigurationError());
     }
 
-    const partialToken = createSecureToken(
-      { userId: id, type: PARTIAL_AUTH_TOKEN_TYPE },
-      secret(),
-      {
-        expiresIn: '5m',
-      },
-    );
-    return json({ requiresTwoFactor: true, partialToken });
+    return json({ requiresTwoFactor: true, partialToken: createPartialToken(id) });
   }
-  // 2FA is required but not set up yet: the session is limited to the setup routes until it is.
-  const twoFactorSetup =
-    !cloudMode && isTwoFactorConfigured() && !!(await getTwoFactorRequiredReason(id));
 
-  // Bind token to password hash so a password change invalidates old tokens.
-  const pwd = hash(user.password);
-  const session = { userId: id, role, pwd, ...(twoFactorSetup && { twoFactorSetup }) };
-
-  let token: string;
-
-  if (redis.enabled) {
-    token = await saveAuth(session);
-  } else {
-    token = createSecureToken(session, secret());
-  }
+  // Browsers use the session cookie; API clients send the token as a bearer token.
+  const { token, headers } = await createUserSession(request, id);
 
   const teams = await addTeamBillingStatus(await getAllUserTeams(id));
 
-  return json({
-    token,
-    user: {
-      id,
-      username,
-      role,
-      createdAt,
-      isAdmin: role === ROLES.admin,
-      passwordChangeRequired,
-      teams,
+  return json(
+    {
+      token,
+      user: {
+        id,
+        username,
+        role,
+        createdAt,
+        isAdmin: role === ROLES.admin,
+        passwordChangeRequired,
+        teams,
+      },
     },
-  });
+    { headers },
+  );
 }

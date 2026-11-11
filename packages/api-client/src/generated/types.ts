@@ -281,7 +281,7 @@ export interface paths {
     put?: never;
     /**
      * Log out
-     * @description Ends the current authentication session by removing its stored token when Redis-backed sessions are enabled.
+     * @description Ends the current authentication session and clears its cookie.
      */
     post: operations['logout'];
     delete?: never;
@@ -301,7 +301,7 @@ export interface paths {
     put?: never;
     /**
      * Create a single sign-on token
-     * @description Returns the authenticated user and a new token valid for 24 hours. Requires Redis-backed authentication.
+     * @description Returns the authenticated user and a single-use token valid for two minutes, which the /sso page exchanges for a session. Requires Redis.
      */
     post: operations['sso'];
     delete?: never;
@@ -5124,11 +5124,8 @@ export interface operations {
         };
         content: {
           'application/json': {
-            /**
-             * @description Whether the operation succeeded.
-             * @constant
-             */
-            ok: true;
+            /** @description Whether the operation succeeded. */
+            ok: boolean;
           };
         };
       };
@@ -5168,7 +5165,7 @@ export interface operations {
         };
         content: {
           'application/json': {
-            token: string;
+            token: unknown;
             /** @description User associated with the resource. */
             user: unknown;
           };
@@ -11501,8 +11498,10 @@ export interface operations {
         content: {
           'application/json': {
             _count: {
+              accounts: number;
               /** @description API keys associated with the user. */
               apiKeys: number;
+              authSessions: number;
               /** @description Boards associated with the user. */
               boards: number;
               /** @description ID of the user who created the resource. */
@@ -11540,6 +11539,31 @@ export interface operations {
               lastUsedAt: string;
               /** @description Display name of the resource. */
               name: string;
+              /** @description ID of the associated user. */
+              userId: string;
+            }[];
+            authSessions: {
+              /**
+               * Format: date-time
+               * @description Date and time the record was created.
+               */
+              createdAt: string;
+              /**
+               * Format: date-time
+               * @description Date and time the credential expires.
+               */
+              expiresAt: string;
+              /** @description Unique identifier of the resource. */
+              id: string;
+              ipAddress: string;
+              token: string;
+              twoFactorSetup: boolean;
+              /**
+               * Format: date-time
+               * @description Date and time the record was last updated.
+               */
+              updatedAt: string;
+              userAgent: string;
               /** @description ID of the associated user. */
               userId: string;
             }[];

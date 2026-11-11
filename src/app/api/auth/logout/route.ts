@@ -1,17 +1,15 @@
-import redis from '@/lib/redis';
+import { endUserSession } from '@/lib/auth-server';
 import { parseRequest } from '@/lib/request';
-import { ok } from '@/lib/response';
+import { json } from '@/lib/response';
 
 export async function POST(request: Request) {
-  const { auth, error } = await parseRequest(request, null, { allowTwoFactorSetup: true });
+  const { error } = await parseRequest(request, null, { allowTwoFactorSetup: true });
 
   if (error) {
     return error();
   }
 
-  if (redis.enabled && auth?.authKey) {
-    await redis.client.del(auth.authKey);
-  }
+  const headers = await endUserSession(request);
 
-  return ok();
+  return json({ ok: true }, { headers });
 }

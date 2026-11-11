@@ -1,12 +1,12 @@
 import { z } from 'zod';
-import { getBearerToken, saveAuth } from '@/lib/auth';
+import { getBearerToken } from '@/lib/auth';
+import { createUserSession } from '@/lib/auth-server';
 import { PARTIAL_AUTH_TOKEN_TYPE, ROLES } from '@/lib/constants';
-import { hash, secret } from '@/lib/crypto';
-import { createSecureToken, parseSecureToken } from '@/lib/jwt';
+import { secret } from '@/lib/crypto';
+import { parseSecureToken } from '@/lib/jwt';
 import { addTeamBillingStatus } from '@/lib/load';
 import { hasDefaultPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
-import redis from '@/lib/redis';
 import { parseRequest } from '@/lib/request';
 import { badRequest, json, notFound, serviceUnavailable, unauthorized } from '@/lib/response';
 import { verifyBackupCode } from '@/lib/two-factor/backup-codes';
@@ -133,28 +133,23 @@ export async function POST(request: Request) {
 
   const { id, role, createdAt, username } = user;
   const passwordChangeRequired = hasDefaultPassword(user);
-  // Bind token to password hash so a password change invalidates old tokens.
-  const pwd = hash(user.password);
-
-  let fullToken: string;
-  if (redis.enabled) {
-    fullToken = await saveAuth({ userId: id, role, pwd });
-  } else {
-    fullToken = createSecureToken({ userId: id, role, pwd }, secret());
-  }
+  const { token: fullToken, headers } = await createUserSession(request, id);
 
   const teams = await addTeamBillingStatus(await getAllUserTeams(id));
 
-  return json({
-    token: fullToken,
-    user: {
-      id,
-      username,
-      role,
-      createdAt,
-      isAdmin: role === ROLES.admin,
-      passwordChangeRequired,
-      teams,
+  return json(
+    {
+      token: fullToken,
+      user: {
+        id,
+        username,
+        role,
+        createdAt,
+        isAdmin: role === ROLES.admin,
+        passwordChangeRequired,
+        teams,
+      },
     },
-  });
+    { headers },
+  );
 }

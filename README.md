@@ -53,6 +53,8 @@ The connection URL format:
 postgresql://username:mypassword@localhost:5432/mydb
 ```
 
+When Umami is served over HTTPS, add `COOKIE_SECURE=1` so that the session cookie is only sent over HTTPS.
+
 ### Build the Application
 
 ```bash

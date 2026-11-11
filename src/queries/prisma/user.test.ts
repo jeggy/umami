@@ -32,10 +32,13 @@ describe('getUserByUsername', () => {
       select: {
         id: true,
         username: true,
-        password: true,
         role: true,
         createdAt: true,
         twoFactorRequired: true,
+        accounts: {
+          where: { providerId: 'credential' },
+          select: { password: true },
+        },
       },
     });
   });
@@ -50,10 +53,10 @@ describe('getUserByUsername', () => {
       select: {
         id: true,
         username: true,
-        password: false,
         role: true,
         createdAt: true,
         twoFactorRequired: true,
+        accounts: false,
       },
     });
   });

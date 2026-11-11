@@ -1,9 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-import { createSessionToken } from '@/lib/auth';
-import { checkPassword, hashPassword } from '@/lib/password';
-import redis from '@/lib/redis';
+import { createUserSession, revokeUserSessions, setUserPassword } from '@/lib/auth-server';
+import { checkPassword } from '@/lib/password';
 import { parseRequest } from '@/lib/request';
-import { getUser, updateUser } from '@/queries/prisma/user';
+import { getUser } from '@/queries/prisma/user';
 import { POST } from './route';
 
 vi.mock('@/lib/request', () => ({
@@ -12,50 +11,37 @@ vi.mock('@/lib/request', () => ({
 
 vi.mock('@/queries/prisma/user', () => ({
   getUser: vi.fn(),
-  updateUser: vi.fn(),
 }));
 
-vi.mock('@/lib/auth', () => ({
-  createSessionToken: vi.fn(),
-}));
-
-vi.mock('@/lib/redis', () => ({
-  default: {
-    enabled: false,
-    client: { del: vi.fn() },
-  },
+vi.mock('@/lib/auth-server', () => ({
+  createUserSession: vi.fn(),
+  revokeUserSessions: vi.fn(),
+  setUserPassword: vi.fn(),
 }));
 
 vi.mock('@/lib/password', () => ({
   checkPassword: vi.fn(),
-  hashPassword: vi.fn(),
 }));
 
 const parseRequestMock = vi.mocked(parseRequest);
 const getUserMock = vi.mocked(getUser);
-const updateUserMock = vi.mocked(updateUser);
 const checkPasswordMock = vi.mocked(checkPassword);
-const hashPasswordMock = vi.mocked(hashPassword);
-const createSessionTokenMock = vi.mocked(createSessionToken);
-const redisMock = redis as unknown as {
-  enabled: boolean;
-  client: { del: ReturnType<typeof vi.fn> };
-};
+const createUserSessionMock = vi.mocked(createUserSession);
+const revokeUserSessionsMock = vi.mocked(revokeUserSessions);
+const setUserPasswordMock = vi.mocked(setUserPassword);
 
 beforeEach(() => {
   parseRequestMock.mockReset();
   getUserMock.mockReset();
-  updateUserMock.mockReset();
   checkPasswordMock.mockReset();
-  hashPasswordMock.mockReset();
-  createSessionTokenMock.mockReset();
-  redisMock.enabled = false;
-  redisMock.client.del.mockReset();
+  createUserSessionMock.mockReset();
+  revokeUserSessionsMock.mockReset();
+  setUserPasswordMock.mockReset();
 });
 
-function mockSuccessfulChange(auth: Record<string, unknown> = {}) {
+function mockSuccessfulChange() {
   parseRequestMock.mockResolvedValue({
-    auth: { user: { id: 'admin-user' }, ...auth },
+    auth: { user: { id: 'admin-user' } },
     body: { currentPassword: 'umami', newPassword: 'new-password' },
     error: undefined,
   } as any);
@@ -65,39 +51,39 @@ function mockSuccessfulChange(auth: Record<string, unknown> = {}) {
     password: 'seeded-password',
   } as any);
   checkPasswordMock.mockReturnValue(true);
-  hashPasswordMock.mockReturnValue('new-password-hash');
-  updateUserMock.mockResolvedValue({ id: 'admin-user' } as any);
-  createSessionTokenMock.mockResolvedValue('new-session-token');
+  createUserSessionMock.mockResolvedValue({
+    token: 'new-session-token',
+    headers: new Headers({ 'set-cookie': 'umami.session_token=new-session-token' }),
+  });
 }
 
 function changePassword() {
   return POST(new Request('http://localhost/api/me/password', { method: 'POST' }));
 }
 
-test('POST keeps the user signed in with a session bound to the new password', async () => {
-  // Changing the password invalidates every existing token, including the one used here.
+test('POST keeps the user signed in with a new session', async () => {
+  // Changing the password ends every existing session, including the one used here.
   mockSuccessfulChange();
 
   const response = await changePassword();
 
-  expect(createSessionTokenMock).toHaveBeenCalledWith({
-    id: 'admin-user',
-    role: 'admin',
-    password: 'new-password-hash',
-  });
+  expect(setUserPasswordMock).toHaveBeenCalledWith('admin-user', 'new-password');
+  expect(response.headers.get('set-cookie')).toBe('umami.session_token=new-session-token');
   await expect(response.json()).resolves.toMatchObject({
     id: 'admin-user',
     token: 'new-session-token',
   });
 });
 
-test('POST removes the replaced Redis session', async () => {
-  redisMock.enabled = true;
-  mockSuccessfulChange({ authKey: 'auth:old-session' });
+test('POST ends the sessions opened with the old password before issuing the new one', async () => {
+  mockSuccessfulChange();
 
   await changePassword();
 
-  expect(redisMock.client.del).toHaveBeenCalledWith('auth:old-session');
+  expect(revokeUserSessionsMock).toHaveBeenCalledWith('admin-user');
+  expect(revokeUserSessionsMock.mock.invocationCallOrder[0]).toBeLessThan(
+    createUserSessionMock.mock.invocationCallOrder[0],
+  );
 });
 
 test('POST does not issue a session when the current password is wrong', async () => {
@@ -107,8 +93,19 @@ test('POST does not issue a session when the current password is wrong', async (
   const response = await changePassword();
 
   expect(response.status).toBe(400);
-  expect(createSessionTokenMock).not.toHaveBeenCalled();
-  expect(updateUserMock).not.toHaveBeenCalled();
+  expect(createUserSessionMock).not.toHaveBeenCalled();
+  expect(setUserPasswordMock).not.toHaveBeenCalled();
+});
+
+// A user who only signs in through an external provider has no password to confirm.
+test('POST rejects the change when the user has no password', async () => {
+  mockSuccessfulChange();
+  getUserMock.mockResolvedValue({ id: 'admin-user', role: 'admin', password: null } as any);
+
+  const response = await changePassword();
+
+  expect(response.status).toBe(400);
+  expect(setUserPasswordMock).not.toHaveBeenCalled();
 });
 
 // The user can be deleted after the request was authenticated.
@@ -123,5 +120,5 @@ test('POST returns 404 when the user no longer exists', async () => {
   const response = await POST(new Request('http://localhost/api/me/password', { method: 'POST' }));
 
   expect(response.status).toBe(404);
-  expect(updateUserMock).not.toHaveBeenCalled();
+  expect(setUserPasswordMock).not.toHaveBeenCalled();
 });

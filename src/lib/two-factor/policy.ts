@@ -1,4 +1,5 @@
 import prisma from '@/lib/prisma';
+import { isTwoFactorConfigured } from '@/lib/two-factor/crypto';
 
 export type TwoFactorRequiredReason = 'global' | 'user' | 'team';
 
@@ -33,4 +34,23 @@ export async function getTwoFactorRequiredReason(
   }
 
   return null;
+}
+
+/**
+ * True when 2FA is required for this user but not set up yet. A session created in that state is
+ * limited to the setup routes until enrollment completes.
+ */
+export async function isTwoFactorSetupRequired(userId: string): Promise<boolean> {
+  // Without an encryption key users cannot set up 2FA, so restricting them would lock them out.
+  if (process.env.CLOUD_MODE || !isTwoFactorConfigured()) {
+    return false;
+  }
+
+  const twoFactor = await prisma.client.twoFactorAuth.findUnique({ where: { userId } });
+
+  if (twoFactor?.isEnabled) {
+    return false;
+  }
+
+  return !!(await getTwoFactorRequiredReason(userId));
 }

@@ -43,17 +43,9 @@ const operation1 = defineOperation({
             schema: {
               type: 'object',
               properties: {
-                token: {
-                  type: 'string',
-                },
                 id: {
                   type: 'string',
                   description: 'Unique identifier of the resource.',
-                },
-                createdAt: {
-                  type: 'string',
-                  format: 'date-time',
-                  description: 'Date and time the record was created.',
                 },
                 username: {
                   type: 'string',
@@ -63,8 +55,16 @@ const operation1 = defineOperation({
                   type: 'string',
                   description: 'Permission role assigned to the user.',
                 },
+                createdAt: {
+                  type: 'string',
+                  format: 'date-time',
+                  description: 'Date and time the record was created.',
+                },
+                token: {
+                  type: 'string',
+                },
               },
-              required: ['token', 'id', 'createdAt', 'username', 'role'],
+              required: ['id', 'username', 'role', 'createdAt', 'token'],
             },
           },
         },
