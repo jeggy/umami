@@ -4,6 +4,7 @@ import { UserSecurityPage } from './UserSecurityPage';
 
 const mockUseConfig = vi.fn();
 const mockUseTwoFactorStatusQuery = vi.fn();
+const mockUseLinkedAccountsQuery = vi.fn(() => ({ data: undefined, isLoading: false }));
 
 vi.mock('@/components/hooks', async () => {
   const actual = await vi.importActual<typeof import('@/components/hooks')>('@/components/hooks');
@@ -27,6 +28,7 @@ vi.mock('@/components/hooks', async () => {
       },
     }),
     useTwoFactorStatusQuery: () => mockUseTwoFactorStatusQuery(),
+    useLinkedAccountsQuery: () => mockUseLinkedAccountsQuery(),
   };
 });
 
@@ -51,6 +53,23 @@ test('renders password change panel and 2fa panel when cloudMode is disabled', (
 
 test('hides password panel when cloudMode is enabled', () => {
   mockUseConfig.mockReturnValue({ cloudMode: true });
+  mockUseTwoFactorStatusQuery.mockReturnValue({
+    data: { isEnabled: false, isRequired: false, isConfigured: true },
+    isLoading: false,
+  });
+
+  render(<UserSecurityPage />);
+
+  expect(screen.queryByTestId('password-change-button')).not.toBeInTheDocument();
+  expect(screen.getByText('Two-factor authentication')).toBeInTheDocument();
+});
+
+test('hides password panel for a user who only signs in through the external provider', () => {
+  mockUseConfig.mockReturnValue({ cloudMode: false, oidcEnabled: true });
+  mockUseLinkedAccountsQuery.mockReturnValue({
+    data: [{ id: 'account-1', providerId: 'oidc', accountId: 'subject-1' }],
+    isLoading: false,
+  } as any);
   mockUseTwoFactorStatusQuery.mockReturnValue({
     data: { isEnabled: false, isRequired: false, isConfigured: true },
     isLoading: false,

@@ -10,6 +10,12 @@ services:
       APP_SECRET: ${APP_SECRET:?Set APP_SECRET in your .env file}
       # Required for two-factor authentication, generate with: openssl rand -hex 32
       TWO_FACTOR_ENCRYPTION_KEY: replace-me-with-a-64-character-hex-string
+      # Optional: sign in through an OpenID Connect provider. Register the callback URL
+      # https://<your-umami-host>/api/auth/callback/oidc with the provider.
+      # OIDC_DISCOVERY_URL: https://idp.example.com/.well-known/openid-configuration
+      # OIDC_CLIENT_ID: umami
+      # OIDC_CLIENT_SECRET: replace-me
+      # OIDC_PROVIDER_NAME: SSO
     depends_on:
       db:
         condition: service_healthy

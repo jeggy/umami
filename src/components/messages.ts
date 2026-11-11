@@ -450,6 +450,12 @@ export const labels: Record<string, string> = {
   lastUsed: 'label.last-used',
   never: 'label.never',
   copy: 'label.copy',
+  loginWith: 'label.login-with',
+  externalAccount: 'label.external-account',
+  externalAccountLinked: 'label.external-account-linked',
+  externalAccountNotLinked: 'label.external-account-not-linked',
+  linkAccount: 'label.link-account',
+  unlinkAccount: 'label.unlink-account',
 };
 
 export const messages: Record<string, string> = {
@@ -535,4 +541,7 @@ export const messages: Record<string, string> = {
   replayMinDurationDescription: 'message.replay-min-duration-description',
   apiKeyCreated: 'message.api-key-created',
   noApiKeys: 'message.no-api-keys',
+  externalAccountDescription: 'message.external-account-description',
+  externalLoginFailed: 'message.external-login-failed',
+  externalLinkFailed: 'message.external-link-failed',
 };

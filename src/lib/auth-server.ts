@@ -1,10 +1,12 @@
 import { type BetterAuthPlugin, betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { bearer, username } from 'better-auth/plugins';
+import { bearer, genericOAuth, username } from 'better-auth/plugins';
 import { ssoToken } from '@/lib/auth-plugins/sso-token';
+import { twoFactorChallenge } from '@/lib/auth-plugins/two-factor-challenge';
 import { umamiSession } from '@/lib/auth-plugins/umami-session';
-import { AUTH_SESSION_TTL, ROLES } from '@/lib/constants';
+import { AUTH_SESSION_TTL, OIDC_PROVIDER_ID, ROLES } from '@/lib/constants';
 import { secret, uuid } from '@/lib/crypto';
+import { getOidcConfig, isOidcConfigured } from '@/lib/oidc';
 import { checkPassword, hashPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
 import redis from '@/lib/redis';
@@ -26,6 +28,28 @@ const secondaryStorage = redis.enabled
       delete: (key: string) => redis.client.del(`${REDIS_PREFIX}${key}`).then(() => undefined),
     }
   : undefined;
+
+const PROVIDER_TOKEN_FIELDS = [
+  'accessToken',
+  'refreshToken',
+  'idToken',
+  'accessTokenExpiresAt',
+  'refreshTokenExpiresAt',
+];
+
+// An external account is used to identify the user and nothing else, so the
+// provider's tokens are not kept.
+function withoutProviderTokens(account: Record<string, any>) {
+  const data = { ...account };
+
+  for (const field of PROVIDER_TOKEN_FIELDS) {
+    if (field in data) {
+      data[field] = null;
+    }
+  }
+
+  return { data };
+}
 
 function createAuth() {
   return betterAuth({
@@ -78,8 +102,23 @@ function createAuth() {
         },
       },
     },
+    account: {
+      accountLinking: {
+        // Existing users have no real email address, so an external account is never matched
+        // to them by email. They link it themselves while signed in.
+        disableImplicitLinking: true,
+        allowDifferentEmails: true,
+        // Linking is refused for an untrusted provider unless it reports the email as verified,
+        // which not every provider does. The administrator chose this provider.
+        trustedProviders: [OIDC_PROVIDER_ID],
+      },
+    },
     secondaryStorage,
     databaseHooks: {
+      account: {
+        create: { before: async account => withoutProviderTokens(account) },
+        update: { before: async account => withoutProviderTokens(account) },
+      },
       session: {
         create: {
           // Decided once, when the session is created, whichever way the user signed in.
@@ -123,6 +162,12 @@ function createAuth() {
       bearer(),
       ssoToken(),
       umamiSession(),
+      ...(isOidcConfigured()
+        ? [
+            genericOAuth({ config: [getOidcConfig()] }) as unknown as BetterAuthPlugin,
+            twoFactorChallenge(),
+          ]
+        : []),
     ],
   });
 }

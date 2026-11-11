@@ -55,6 +55,26 @@ postgresql://username:mypassword@localhost:5432/mydb
 
 When Umami is served over HTTPS, add `COOKIE_SECURE=1` so that the session cookie is only sent over HTTPS.
 
+To let users sign in through an OpenID Connect provider, add:
+
+```bash
+OIDC_DISCOVERY_URL=https://idp.example.com/.well-known/openid-configuration
+OIDC_CLIENT_ID=client-id
+OIDC_CLIENT_SECRET=client-secret
+```
+
+Register `https://<your-umami-host>/api/auth/callback/oidc` as the redirect URI with the provider. Optional settings:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OIDC_PROVIDER_NAME` | `SSO` | Name shown on the login button |
+| `OIDC_SCOPES` | `openid profile email` | Scopes to request |
+| `OIDC_DISABLE_SIGNUP` | | Set to `1` to only allow users who have linked their account |
+
+A first sign-in creates a user with the `user` role. Existing users link their provider account under **Settings → Security**.
+
+Behind a reverse proxy, the redirect URI is built from the `X-Forwarded-Host` and `X-Forwarded-Proto` headers. Set `BETTER_AUTH_URL=https://<your-umami-host>` if the proxy does not send them.
+
 ### Build the Application
 
 ```bash

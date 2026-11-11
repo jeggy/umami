@@ -6,15 +6,23 @@ import { Badge } from '@/components/common/Badge';
 import { PageBody } from '@/components/common/PageBody';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Panel } from '@/components/common/Panel';
-import { useConfig, useMessages, useTwoFactorStatusQuery } from '@/components/hooks';
+import {
+  useConfig,
+  useLinkedAccountsQuery,
+  useMessages,
+  useTwoFactorStatusQuery,
+} from '@/components/hooks';
 import { TwoFactorDisableModal } from '@/components/modals/TwoFactorDisableModal';
 import { TwoFactorSetupModal } from '@/components/modals/TwoFactorSetupModal';
+import { CREDENTIAL_PROVIDER_ID } from '@/lib/constants';
+import { ExternalAccountPanel } from './ExternalAccountPanel';
 import { PasswordChangeButton } from './PasswordChangeButton';
 
 export function UserSecurityPage() {
   const { t, labels, messages } = useMessages();
-  const { cloudMode } = useConfig();
+  const { cloudMode, oidcEnabled } = useConfig();
   const { data: status, isLoading } = useTwoFactorStatusQuery(true);
+  const { data: accounts, isLoading: isLoadingAccounts } = useLinkedAccountsQuery(!!oidcEnabled);
   const queryClient = useQueryClient();
   const [showSetup, setShowSetup] = useState(false);
   const [showDisable, setShowDisable] = useState(false);
@@ -42,13 +50,17 @@ export function UserSecurityPage() {
     queryClient.invalidateQueries({ queryKey: ['2fa-status'] });
   };
 
-  if (isLoading) return null;
+  // A user created by a sign-in through the external provider has no password to change.
+  const hasPassword =
+    !accounts || accounts.some(({ providerId }) => providerId === CREDENTIAL_PROVIDER_ID);
+
+  if (isLoading || isLoadingAccounts) return null;
 
   return (
     <PageBody>
       <Column gap="6">
         <PageHeader title={t(labels.security)} />
-        {!cloudMode && (
+        {!cloudMode && hasPassword && (
           <Panel>
             <Column gap="4">
               <Row alignItems="center" gap="3">
@@ -60,6 +72,7 @@ export function UserSecurityPage() {
             </Column>
           </Panel>
         )}
+        <ExternalAccountPanel />
         <Panel>
           <Column gap="4">
             <Row alignItems="center" gap="3">

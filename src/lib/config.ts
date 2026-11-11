@@ -1,9 +1,12 @@
 import { isRelationalOnly } from '@/lib/db';
+import { getOidcProviderName, isOidcConfigured } from '@/lib/oidc';
 
 export type Config = {
   cloudMode: boolean;
   faviconUrl?: string;
   linksUrl?: string;
+  oidcEnabled: boolean;
+  oidcProviderName?: string;
   pixelsUrl?: string;
   privateMode: boolean;
   sessionDeletionEnabled: boolean;
@@ -21,6 +24,8 @@ export function getConfig(): Config {
     cloudMode: !!process.env.CLOUD_MODE,
     faviconUrl: process.env.FAVICON_URL,
     linksUrl: process.env.LINKS_URL,
+    oidcEnabled: isOidcConfigured(),
+    oidcProviderName: isOidcConfigured() ? getOidcProviderName() : undefined,
     pixelsUrl: process.env.PIXELS_URL,
     privateMode: !!process.env.PRIVATE_MODE,
     sessionDeletionEnabled: isRelationalOnly(),

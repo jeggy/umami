@@ -31,10 +31,15 @@ export function LoginTwoFactorPage() {
 
   // Redirect to the login page when no token
   useEffect(() => {
-    const token = sessionStorage.getItem('umami.partial-token');
+    // A sign-in through an external provider arrives with the token in the URL fragment.
+    const hashToken = new URLSearchParams(window.location.hash.slice(1)).get('token');
+    const token = hashToken ?? sessionStorage.getItem('umami.partial-token');
     if (!token) {
       router.replace('/login');
       return;
+    }
+    if (hashToken) {
+      window.history.replaceState(null, '', window.location.pathname);
     }
     sessionStorage.removeItem('umami.partial-token');
     partialTokenRef.current = token;

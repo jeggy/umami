@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { LoginPage } from './LoginPage';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,11 @@ export default async function () {
     return null;
   }
 
-  return <LoginPage />;
+  return (
+    <Suspense>
+      <LoginPage />
+    </Suspense>
+  );
 }
 
 export const metadata: Metadata = {

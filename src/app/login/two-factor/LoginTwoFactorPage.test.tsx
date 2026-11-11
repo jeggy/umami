@@ -89,3 +89,22 @@ test('focuses the backup code field when switching to backup codes', async () =>
 
   expect(screen.getByLabelText('twoFactorBackupCode')).toHaveFocus();
 });
+
+test('takes the partial token from the URL fragment after an external sign-in', async () => {
+  sessionStorage.removeItem('umami.partial-token');
+  mockVerify.mockRejectedValue(new Error('Invalid code'));
+  const { user } = render(<LoginTwoFactorPage />, {
+    route: '/login/two-factor#token=fragment-token',
+  });
+
+  await user.keyboard('123456');
+
+  await waitFor(() =>
+    expect(mockVerify).toHaveBeenCalledWith({
+      partialToken: 'fragment-token',
+      token: '123456',
+      backupCode: undefined,
+    }),
+  );
+  expect(window.location.hash).toBe('');
+});

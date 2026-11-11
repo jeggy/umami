@@ -13,6 +13,7 @@ export const SHARE_CONTEXT_HEADER = 'x-umami-share-context';
 export const SHARE_TOKEN_TYPE = 'share';
 export const CACHE_TOKEN_TYPE = 'cache';
 export const PARTIAL_AUTH_TOKEN_TYPE = 'partial-auth';
+export const OIDC_PROVIDER_ID = 'oidc';
 export const CREDENTIAL_PROVIDER_ID = 'credential';
 // Lifetime of an auth session, counted from the sign-in.
 export const AUTH_SESSION_TTL = 60 * 60 * 24 * 30;

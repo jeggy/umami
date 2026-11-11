@@ -445,7 +445,13 @@
     "never": "Never",
     "copy": "Copy",
     "authorize": "Authorize",
-    "deny": "Deny"
+    "deny": "Deny",
+    "login-with": "Sign in with {name}",
+    "external-account": "{name} account",
+    "external-account-linked": "Linked",
+    "external-account-not-linked": "Not linked",
+    "link-account": "Link account",
+    "unlink-account": "Unlink account"
   },
   "message": {
     "action-confirmation": "Type {confirmation} in the box below to confirm.",
@@ -534,7 +540,10 @@
     "two-factor-locked-message": "Too many failed attempts. Try again at {time}.",
     "two-factor-active-description": "Your account is protected with two-factor authentication. Each login requires a code from your authenticator app.",
     "api-key-created": "Copy your API key now. You won't be able to see it again.",
-    "no-api-keys": "You have not created any API keys."
+    "no-api-keys": "You have not created any API keys.",
+    "external-account-description": "A linked {name} account can be used to sign in.",
+    "external-login-failed": "Sign-in with {name} failed.",
+    "external-link-failed": "The {name} account could not be linked."
   },
   "errorTracking": {
     "title": "Errors",

@@ -1,4 +1,5 @@
 import {
+  Button,
   Column,
   Form,
   FormButtons,
@@ -9,16 +10,37 @@ import {
   PasswordField,
   TextField,
 } from '@umami/react-zen';
-import { useRouter } from 'next/navigation';
-import { useMessages, useUpdateQuery } from '@/components/hooks';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
+import { useApi, useConfig, useMessages, useUpdateQuery } from '@/components/hooks';
 import { Logo } from '@/components/svg';
+import { OIDC_PROVIDER_ID } from '@/lib/constants';
 import { consumeReturnUrl } from '@/lib/return-url';
 import { setUser } from '@/store/app';
 
 export function LoginForm() {
-  const { t, labels, getErrorMessage } = useMessages();
+  const { t, labels, messages, getErrorMessage } = useMessages();
   const router = useRouter();
   const { mutateAsync, error } = useUpdateQuery('/auth/login');
+  const { oidcEnabled, oidcProviderName } = useConfig();
+  const { post } = useApi();
+  // The provider redirects back here with an error code when the sign-in fails.
+  const [externalFailed, setExternalFailed] = useState(!!useSearchParams().get('error'));
+  const basePath = process.env.basePath || '';
+
+  const handleExternalLogin = async () => {
+    try {
+      const { url } = await post('/auth/sign-in/social', {
+        provider: OIDC_PROVIDER_ID,
+        callbackURL: `${basePath}${consumeReturnUrl() ?? '/'}`,
+        errorCallbackURL: `${basePath}/login`,
+      });
+
+      window.location.href = url;
+    } catch {
+      setExternalFailed(true);
+    }
+  };
 
   const handleSubmit = async (data: any) => {
     await mutateAsync(data, {
@@ -42,7 +64,10 @@ export function LoginForm() {
       <Heading>umami</Heading>
       <Form
         onSubmit={handleSubmit}
-        error={getErrorMessage(error)}
+        error={
+          getErrorMessage(error) ??
+          (externalFailed ? t(messages.externalLoginFailed, { name: oidcProviderName }) : undefined)
+        }
         defaultValues={{ username: '', password: '' }}
         style={{ minWidth: 300 }}
       >
@@ -73,6 +98,11 @@ export function LoginForm() {
             {t(labels.login)}
           </FormSubmitButton>
         </FormButtons>
+        {oidcEnabled && (
+          <Button data-test="button-login-external" onPress={handleExternalLogin}>
+            {t(labels.loginWith, { name: oidcProviderName })}
+          </Button>
+        )}
       </Form>
     </Column>
   );
