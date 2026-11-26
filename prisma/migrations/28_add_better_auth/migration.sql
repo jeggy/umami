@@ -17,8 +17,10 @@ UPDATE "user" SET "display_name" = "username" WHERE "display_name" IS NULL;
 
 ALTER TABLE "user" ALTER COLUMN "email" SET NOT NULL;
 
--- The password now lives in the account table. The column is kept for one
--- release so the migration can be rolled back.
+-- The password now lives in the account table, and nothing reads or writes
+-- this column any more. A later migration can drop it. Prisma has no down
+-- migrations, and the column keeps the old hash after a password change, so it
+-- does not make a downgrade safe.
 ALTER TABLE "user" ALTER COLUMN "password" DROP NOT NULL;
 
 -- CreateIndex
