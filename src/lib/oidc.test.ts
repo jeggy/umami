@@ -64,6 +64,12 @@ describe('getOidcConfig', () => {
     expect(getOidcConfig().disableSignUp).toBe(true);
   });
 
+  test.each(['0', 'false', ' FALSE '])('keeps sign-up on when OIDC_DISABLE_SIGNUP is %j', value => {
+    vi.stubEnv('OIDC_DISABLE_SIGNUP', value);
+
+    expect(getOidcConfig().disableSignUp).toBe(false);
+  });
+
   test('takes the username from preferred_username, lowercased like every Umami username', () => {
     const user = getOidcConfig().mapProfileToUser({
       preferred_username: 'Alice',

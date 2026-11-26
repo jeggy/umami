@@ -8,11 +8,18 @@ export function LogoutPage() {
 
   useEffect(() => {
     async function logout() {
-      await post('/auth/logout').catch(() => undefined);
+      let redirect: string | undefined;
 
-      setUser(null);
-
-      window.location.href = `${process.env.basePath || ''}/login`;
+      try {
+        // The session cookie goes with this request, so the server ends that session. A user who
+        // signed in through a provider is sent on to end the provider's session as well.
+        ({ redirect } = await post('/auth/logout'));
+      } catch {
+        // The local logout below must still happen if the server call fails.
+      } finally {
+        setUser(null);
+        window.location.href = redirect || `${process.env.basePath || ''}/login`;
+      }
     }
 
     logout();
