@@ -8,11 +8,15 @@ export function LogoutPage() {
 
   useEffect(() => {
     async function logout() {
-      await post('/auth/logout').catch(() => undefined);
-
-      setUser(null);
-
-      window.location.href = `${process.env.basePath || ''}/login`;
+      try {
+        // The session cookie goes with this request, so the server ends that session.
+        await post('/auth/logout');
+      } catch {
+        // The local logout below must still happen if the server call fails.
+      } finally {
+        setUser(null);
+        window.location.href = `${process.env.basePath || ''}/login`;
+      }
     }
 
     logout();
