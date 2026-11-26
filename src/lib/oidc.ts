@@ -1,5 +1,6 @@
 import { OIDC_PROVIDER_ID } from '@/lib/constants';
 import { md5 } from '@/lib/crypto';
+import { parseBooleanEnv } from '@/lib/env';
 
 const DEFAULT_PROVIDER_NAME = 'SSO';
 const DEFAULT_SCOPES = 'openid profile email';
@@ -27,7 +28,7 @@ export function getOidcConfig() {
     scopes: (process.env.OIDC_SCOPES || DEFAULT_SCOPES).split(/\s+/).filter(Boolean),
     pkce: true,
     // Only users who have already linked their account can sign in.
-    disableSignUp: !!process.env.OIDC_DISABLE_SIGNUP,
+    disableSignUp: parseBooleanEnv(process.env.OIDC_DISABLE_SIGNUP) ?? false,
     mapProfileToUser: (profile: Record<string, any>) => {
       // Umami identifies users by username; the email and the subject are the fallbacks for
       // providers that do not send preferred_username.

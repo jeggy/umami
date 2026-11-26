@@ -102,3 +102,23 @@ test('POST unlink-account does not remove the password account', async () => {
   expect(handler).not.toHaveBeenCalled();
   expect(response.status).toBe(400);
 });
+
+// The provider callback sets the session cookie, so it follows the request protocol too.
+test('a callback forwarded as https gets a Secure session cookie', async () => {
+  handler.mockResolvedValue(
+    new Response(null, {
+      status: 302,
+      headers: { location: '/websites', 'set-cookie': 'umami.session_token=abc; Path=/' },
+    }),
+  );
+
+  const response = await GET(
+    new Request('http://localhost/api/auth/callback/oidc', {
+      headers: { 'x-forwarded-proto': 'https' },
+    }),
+  );
+
+  expect(response.status).toBe(302);
+  expect(response.headers.get('location')).toBe('/websites');
+  expect(response.headers.get('set-cookie')).toBe('umami.session_token=abc; Path=/; Secure');
+});

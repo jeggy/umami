@@ -1,5 +1,6 @@
 import { toNextJsHandler } from 'better-auth/next-js';
 import { checkAuth } from '@/lib/auth';
+import { withSecureCookies } from '@/lib/auth-cookies';
 import { getAuth } from '@/lib/auth-server';
 import { OIDC_PROVIDER_ID } from '@/lib/constants';
 import prisma from '@/lib/prisma';
@@ -72,7 +73,13 @@ async function handle(request: Request) {
   // builds the callback URL that the external provider redirects back to from it.
   url.pathname = `${BASE_PATH}${url.pathname}`;
 
-  return getAuth().handler(new Request(url, request));
+  const response = await getAuth().handler(new Request(url, request));
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: withSecureCookies(request, response.headers),
+  });
 }
 
 export const { GET, POST } = toNextJsHandler(handle);

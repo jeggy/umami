@@ -1,6 +1,7 @@
 import { type BetterAuthPlugin, betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { bearer, genericOAuth, username } from 'better-auth/plugins';
+import { getForcedSecureCookies, withSecureCookies } from '@/lib/auth-cookies';
 import { ssoToken } from '@/lib/auth-plugins/sso-token';
 import { twoFactorChallenge } from '@/lib/auth-plugins/two-factor-challenge';
 import { umamiSession } from '@/lib/auth-plugins/umami-session';
@@ -58,6 +59,10 @@ function createAuth() {
     // src/app/api/auth/[...all]/route.ts).
     basePath: `${process.env.basePath || ''}/api/auth`,
     trustedOrigins: [process.env.CLOUD_URL].filter(Boolean),
+    // A provider sign-in that fails before better-auth knows where to send the user, such as one
+    // with an expired state, lands on the login page with its error code instead of better-auth's
+    // own error page.
+    onAPIError: { errorURL: `${process.env.basePath || ''}/login` },
     database: prismaAdapter(prisma.client, { provider: 'postgresql' }),
     emailAndPassword: {
       enabled: true,
@@ -87,10 +92,10 @@ function createAuth() {
     session: {
       // The analytics visitor table owns the "session" name.
       modelName: 'authSession',
+      // A session in use is extended once a day (better-auth's default updateAge), but only
+      // by refreshUserSession: checkAuth reads without refreshing, because a request that is
+      // only being authenticated cannot set the renewed cookie.
       expiresIn: AUTH_SESSION_TTL,
-      // A refreshed session would need a new cookie, which a request that is only being
-      // authenticated cannot set.
-      disableSessionRefresh: true,
       // Unlinking an account is the only exposed endpoint with a session age limit, and Umami
       // has no way to ask the user to sign in again for it.
       freshAge: 0,
@@ -143,11 +148,9 @@ function createAuth() {
       // Detect https correctly behind a reverse proxy.
       trustedProxyHeaders: true,
       // better-auth marks cookies Secure whenever NODE_ENV is production, which
-      // breaks self-hosted installs served over plain http. Opt in with
-      // COOKIE_SECURE=1; the default follows CLOUD_URL.
-      useSecureCookies: process.env.COOKIE_SECURE
-        ? !['0', 'false'].includes(process.env.COOKIE_SECURE)
-        : (process.env.CLOUD_URL || '').startsWith('https://'),
+      // breaks self-hosted installs served over plain http. Unless COOKIE_SECURE or
+      // CLOUD_URL decides, withSecureCookies follows the protocol of each request.
+      useSecureCookies: getForcedSecureCookies() ?? false,
     },
     plugins: [
       // The casts work around plugin types that need strictNullChecks, which
@@ -229,7 +232,20 @@ export async function createUserSession(request: Request, userId: string) {
     returnHeaders: true,
   });
 
-  return { token: response.token as string, headers };
+  return { token: response.token as string, headers: withSecureCookies(request, headers) };
+}
+
+/**
+ * Moves the expiry of the request's session forward when it is due, so an active user stays
+ * signed in. Returns the headers that renew the cookie, without Set-Cookie when nothing changed.
+ */
+export async function refreshUserSession(request: Request) {
+  const { headers } = await getAuth().api.getSession({
+    headers: request.headers,
+    returnHeaders: true,
+  });
+
+  return withSecureCookies(request, headers);
 }
 
 /** Ends the session of the request. Returns the headers that clear the cookie. */
@@ -239,5 +255,5 @@ export async function endUserSession(request: Request) {
     returnHeaders: true,
   });
 
-  return headers;
+  return withSecureCookies(request, headers);
 }
