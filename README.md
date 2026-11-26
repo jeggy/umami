@@ -53,7 +53,7 @@ The connection URL format:
 postgresql://username:mypassword@localhost:5432/mydb
 ```
 
-When Umami is served over HTTPS, add `COOKIE_SECURE=1` so that the session cookie is only sent over HTTPS.
+The session cookie is marked Secure when a request arrives over HTTPS, directly or through a reverse proxy that sets `X-Forwarded-Proto: https`. Set `COOKIE_SECURE=1` to mark it Secure on every request, or `COOKIE_SECURE=0` to never mark it.
 
 To let users sign in through an OpenID Connect provider, add:
 
