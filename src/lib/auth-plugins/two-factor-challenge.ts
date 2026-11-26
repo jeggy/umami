@@ -49,7 +49,7 @@ export function twoFactorChallenge() {
 
             // The token travels in the URL fragment, which the browser does not send to a server.
             throw ctx.redirect(
-              `${BASE_PATH}/login/two-factor#token=${encodeURIComponent(createPartialToken(data.user.id))}`,
+              `${BASE_PATH}/login/two-factor#token=${encodeURIComponent(createPartialToken(data.user.id, data.session.providerId))}`,
             );
           }),
         },

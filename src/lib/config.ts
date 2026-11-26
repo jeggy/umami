@@ -1,12 +1,12 @@
 import { isRelationalOnly } from '@/lib/db';
-import { getOidcProviderName, isOidcConfigured } from '@/lib/oidc';
+import { getLoginProviders } from '@/lib/oidc';
 
 export type Config = {
   cloudMode: boolean;
   faviconUrl?: string;
   linksUrl?: string;
-  oidcEnabled: boolean;
-  oidcProviderName?: string;
+  /** The OIDC providers a user can sign in through. */
+  oidcProviders: { slug: string; name: string }[];
   pixelsUrl?: string;
   privateMode: boolean;
   sessionDeletionEnabled: boolean;
@@ -19,13 +19,12 @@ export type Config = {
  * Server-side only. Reads runtime environment values that the client needs.
  * Must be called at request time (not build time) so Docker/runtime env is honored.
  */
-export function getConfig(): Config {
+export async function getConfig(): Promise<Config> {
   return {
     cloudMode: !!process.env.CLOUD_MODE,
     faviconUrl: process.env.FAVICON_URL,
     linksUrl: process.env.LINKS_URL,
-    oidcEnabled: isOidcConfigured(),
-    oidcProviderName: isOidcConfigured() ? getOidcProviderName() : undefined,
+    oidcProviders: await getLoginProviders(),
     pixelsUrl: process.env.PIXELS_URL,
     privateMode: !!process.env.PRIVATE_MODE,
     sessionDeletionEnabled: isRelationalOnly(),

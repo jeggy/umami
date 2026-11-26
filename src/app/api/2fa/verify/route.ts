@@ -133,7 +133,7 @@ export async function POST(request: Request) {
 
   const { id, role, createdAt, username } = user;
   const passwordChangeRequired = hasDefaultPassword(user);
-  const { token: fullToken, headers } = await createUserSession(request, id);
+  const { token: fullToken, headers } = await createUserSession(request, id, payload.providerId);
 
   const teams = await addTeamBillingStatus(await getAllUserTeams(id));
 

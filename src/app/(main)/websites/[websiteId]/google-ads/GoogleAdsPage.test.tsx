@@ -1,7 +1,12 @@
+import type { ReactNode } from 'react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { httpGet } from '@/lib/fetch';
+import { getTestRouter } from '@/test/navigation';
 import { render, screen, userEvent, waitFor } from '@/test/render';
 import { GoogleAdsPage } from './GoogleAdsPage';
+
+const ACCOUNT = { provider: 'google_ads', currencyCode: 'EUR', createdAt: '2026-01-01' };
+const ads = vi.hoisted(() => ({ connections: [] as unknown[] }));
 
 const subscription = vi.hoisted(() => ({
   current: { cloudMode: true, isLoading: false, hasFeature: (): boolean => true },
@@ -27,6 +32,32 @@ vi.mock('@/components/hooks', async importOriginal => ({
     isAllTime: comparison.isAllTime,
   }),
 }));
+// A native select stands in for the account picker so a test can choose an option.
+vi.mock('@umami/react-zen', async importOriginal => ({
+  ...(await importOriginal<typeof import('@umami/react-zen')>()),
+  ListItem: ({ id, children }: { id: string; children: ReactNode }) => (
+    <option value={id}>{children}</option>
+  ),
+  Select: ({
+    label,
+    value,
+    onChange,
+    children,
+  }: {
+    label: string;
+    value?: string;
+    onChange?: (value: string) => void;
+    children: ReactNode;
+  }) => (
+    <select
+      aria-label={label}
+      value={value ?? ''}
+      onChange={event => onChange?.(event.currentTarget.value)}
+    >
+      {children}
+    </select>
+  ),
+}));
 vi.mock('@/app/(main)/websites/[websiteId]/WebsiteControls', () => ({
   WebsiteControls: () => <div data-test="controls" />,
 }));
@@ -43,7 +74,10 @@ function row(overrides = {}) {
     key: 'key',
     name: 'name',
     parent: null,
+    parentKey: null,
     matchType: null,
+    status: null,
+    type: null,
     cost: 0,
     clicks: 0,
     impressions: 0,
@@ -57,7 +91,11 @@ function row(overrides = {}) {
 
 /** Rows by dimension for the selected range; `previous` holds the comparison period's days. */
 function respondWith(byDimension: Record<string, unknown[]>, currencyCode: string | null = 'EUR') {
-  vi.mocked(httpGet).mockImplementation(async (_url, params) => {
+  vi.mocked(httpGet).mockImplementation(async (url, params) => {
+    if (String(url).endsWith('/api/integrations/ads/connections')) {
+      return { ok: true, status: 200, data: ads.connections };
+    }
+
     const { dimension, startDate } = params as { dimension: string; startDate: string };
     const key = startDate === '2025-12-25' ? 'previous' : dimension;
 
@@ -79,6 +117,7 @@ function failWith(code: string, status: number) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  ads.connections = [{ ...ACCOUNT, id: 'conn-1', name: 'Umami', accountId: '1234567890' }];
   subscription.current = { cloudMode: true, isLoading: false, hasFeature: () => true };
   dateRange.startDate = new Date('2026-01-01T00:00:00');
   dateRange.endDate = new Date('2026-01-07T23:59:59');
@@ -298,8 +337,160 @@ test('lists campaigns, then loads ad groups with their campaign and keywords wit
   expect(screen.getByText('Shoes · Exact match')).toBeInTheDocument();
 });
 
+test("shows a campaign's type and any status other than enabled", async () => {
+  respondWith({
+    campaign: [
+      row({ key: '1', name: 'Spring sale', type: 'SEARCH', status: 'ENABLED', impressions: 1 }),
+      row({ key: '2', name: 'Old promo', type: 'PERFORMANCE_MAX', status: 'PAUSED' }),
+    ],
+  });
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  expect(await screen.findByText('Spring sale')).toBeInTheDocument();
+  expect(screen.getByText('Search')).toBeInTheDocument();
+  expect(screen.getByText('Performance max · Paused')).toBeInTheDocument();
+});
+
+test('sorts by the clicked column and searches by name', async () => {
+  respondWith({
+    campaign: [
+      row({ key: '1', name: 'Alpha', cost: 30, clicks: 1 }),
+      row({ key: '2', name: 'Bravo', cost: 20, clicks: 9 }),
+      row({ key: '3', name: 'Charlie', cost: 10, clicks: 5 }),
+    ],
+  });
+  const user = userEvent.setup();
+  const names = () =>
+    screen.getAllByText(/^(Alpha|Bravo|Charlie)$/).map(element => element.textContent);
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  await screen.findByText('Alpha');
+  expect(names()).toEqual(['Alpha', 'Bravo', 'Charlie']); // highest cost first
+
+  // The Clicks card has the same name, so pick the column header by its pressed state.
+  const clicksHeader = screen
+    .getAllByRole('button', { name: 'Clicks' })
+    .find(button => button.getAttribute('aria-pressed') === 'false');
+  await user.click(clicksHeader);
+  expect(names()).toEqual(['Bravo', 'Charlie', 'Alpha']);
+
+  await user.type(screen.getByPlaceholderText('Search'), 'char');
+  await waitFor(() => expect(names()).toEqual(['Charlie']));
+});
+
+test('pages through more rows than fit one page', async () => {
+  respondWith({
+    campaign: Array.from({ length: 25 }, (_, index) =>
+      row({ key: String(index), name: `Campaign ${index + 1}`, cost: 100 - index }),
+    ),
+  });
+  const user = userEvent.setup();
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  expect(await screen.findByText('Campaign 20')).toBeInTheDocument();
+  expect(screen.queryByText('Campaign 21')).not.toBeInTheDocument();
+
+  const pagerButtons = screen
+    .getAllByRole('button')
+    .filter(button => !button.textContent && !button.getAttribute('aria-pressed'));
+  await user.click(pagerButtons[pagerButtons.length - 1]);
+
+  expect(await screen.findByText('Campaign 21')).toBeInTheDocument();
+  expect(screen.queryByText('Campaign 20')).not.toBeInTheDocument();
+});
+
+test("opens a campaign's ad groups, then an ad group's keywords, and clears the filter", async () => {
+  respondWith({
+    campaign: [row({ key: '11', name: 'Spring sale' })],
+    ad_group: [row({ key: '22', name: 'Shoes', parent: 'Spring sale', parentKey: '11' })],
+    keyword: [row({ key: '22~3', name: 'red shoes', parent: 'Shoes', parentKey: '22' })],
+  });
+  const user = userEvent.setup();
+  const lastQuery = (dimension: string) =>
+    vi
+      .mocked(httpGet)
+      .mock.calls.map(([, params]) => params as Record<string, unknown>)
+      .filter(params => params.dimension === dimension)
+      .at(-1);
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  await user.click(await screen.findByRole('button', { name: 'Spring sale' }));
+  expect(await screen.findByRole('button', { name: 'Shoes' })).toBeInTheDocument();
+  expect(lastQuery('ad_group')).toMatchObject({ campaignId: '11' });
+
+  await user.click(screen.getByRole('button', { name: 'Shoes' }));
+  expect(await screen.findByText('red shoes')).toBeInTheDocument();
+  expect(lastQuery('keyword')).toMatchObject({ adGroupId: '22' });
+  expect(lastQuery('keyword')).not.toHaveProperty('campaignId');
+
+  await user.click(screen.getByTitle('Clear filter'));
+  await waitFor(() => expect(lastQuery('keyword')).not.toHaveProperty('adGroupId'));
+});
+
+test('lists search terms with their ad group and landing pages by URL', async () => {
+  respondWith({
+    search_term: [row({ key: '22~buy red shoes', name: 'buy red shoes', parent: 'Shoes' })],
+    landing_page: [row({ key: 'https://example.com/shoes', name: 'https://example.com/shoes' })],
+  });
+  const user = userEvent.setup();
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  await user.click(await screen.findByRole('tab', { name: 'Search terms' }));
+  expect(await screen.findByText('buy red shoes')).toBeInTheDocument();
+  expect(screen.getByText('Shoes')).toBeInTheDocument();
+
+  await user.click(screen.getByRole('tab', { name: 'Landing pages' }));
+  expect(await screen.findByText('https://example.com/shoes')).toBeInTheDocument();
+});
+
+test('names devices and networks the way Google Ads does', async () => {
+  respondWith({
+    device: [row({ key: 'MOBILE', name: 'MOBILE' }), row({ key: 'OTHER', name: 'OTHER' })],
+    network: [
+      row({ key: 'CONTENT', name: 'CONTENT' }),
+      row({ key: 'GOOGLE_TV', name: 'GOOGLE_TV' }),
+    ],
+  });
+  const user = userEvent.setup();
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  await user.click(await screen.findByRole('tab', { name: 'Devices' }));
+  expect(await screen.findByText('Mobile phones')).toBeInTheDocument();
+  expect(screen.getByText('Other')).toBeInTheDocument();
+
+  await user.click(screen.getByRole('tab', { name: 'Networks' }));
+  expect(await screen.findByText('Display Network')).toBeInTheDocument();
+  // A value without a name of its own is still made readable.
+  expect(screen.getByText('Google tv')).toBeInTheDocument();
+});
+
+test('narrows search terms to the campaign that was opened', async () => {
+  respondWith({
+    campaign: [row({ key: '11', name: 'Spring sale' })],
+    search_term: [row({ key: '22~buy red shoes', name: 'buy red shoes', parent: 'Shoes' })],
+  });
+  const user = userEvent.setup();
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  await user.click(await screen.findByRole('button', { name: 'Spring sale' }));
+  await user.click(screen.getByRole('tab', { name: 'Search terms' }));
+
+  expect(await screen.findByText('buy red shoes')).toBeInTheDocument();
+  expect(httpGet).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ dimension: 'search_term', campaignId: '11' }),
+  );
+});
+
 test.each([
-  ['not_connected', 404, 'Connect Google Ads'],
+  ['not_connected', 404, 'Connect an ad account'],
   ['account_not_set', 409, 'Choose a Google Ads account'],
   ['manager_account', 400, 'Choose a Google Ads account'],
   ['authentication', 401, 'Reconnect Google Ads'],
@@ -344,5 +535,97 @@ test('asks for a shorter range instead of sending one Cloud would reject', () =>
 
   expect(screen.getByText('Choose a shorter date range')).toBeInTheDocument();
   expect(screen.getByTestId('controls')).toBeInTheDocument();
-  expect(httpGet).not.toHaveBeenCalled();
+  // Listing the ad accounts is fine; no report is requested.
+  expect(httpGet).not.toHaveBeenCalledWith(
+    expect.stringMatching(/\/api\/integrations\/google-ads\/query$/),
+    expect.anything(),
+  );
+});
+
+// A website with one ad account has nothing to choose between.
+test('hides the ad account choice when the website has one ad account', async () => {
+  respondWith({ date: [row({ key: '2026-01-01', cost: 1 })] });
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  expect(await screen.findByText('cost chart: 1 days')).toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: 'Ad account' })).not.toBeInTheDocument();
+});
+
+// With several ad accounts, the newest is shown first and choosing another reports on it.
+test('lists each ad account once and switches the report to the one chosen', async () => {
+  ads.connections = [
+    { ...ACCOUNT, id: 'conn-2', name: 'Umami EU', accountId: '9876543210' },
+    { ...ACCOUNT, id: 'conn-1', name: 'Umami', accountId: '1234567890' },
+  ];
+  respondWith({ date: [] });
+  const user = userEvent.setup();
+
+  render(<GoogleAdsPage websiteId="site-1" />);
+
+  const picker = await screen.findByRole('combobox', { name: 'Ad account' });
+  expect(picker).toHaveValue('conn-2');
+  expect(screen.getByRole('option', { name: 'Umami · 123-456-7890' })).toBeInTheDocument();
+
+  await user.selectOptions(picker, 'conn-1');
+
+  expect(getTestRouter().push).toHaveBeenCalledWith(expect.stringContaining('connection=conn-1'));
+});
+
+// The account in the URL is the one every report reads, so a shared link shows the same data.
+test('reports on the ad account named in the URL', async () => {
+  ads.connections = [
+    { ...ACCOUNT, id: 'conn-2', name: 'Umami EU', accountId: '9876543210' },
+    { ...ACCOUNT, id: 'conn-1', name: 'Umami', accountId: '1234567890' },
+  ];
+  respondWith({ date: [] });
+
+  render(<GoogleAdsPage websiteId="site-1" />, { route: '/?connection=conn-1' });
+
+  expect(await screen.findByRole('combobox', { name: 'Ad account' })).toHaveValue('conn-1');
+  await waitFor(() =>
+    expect(httpGet).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/integrations\/google-ads\/query$/),
+      expect.objectContaining({ connectionId: 'conn-1', dimension: 'date' }),
+    ),
+  );
+});
+
+// A link to an ad account that was since disconnected falls back to the newest one.
+test('drops an ad account from the URL that is no longer connected', async () => {
+  respondWith({ date: [] });
+
+  render(<GoogleAdsPage websiteId="site-1" />, { route: '/?connection=removed' });
+
+  await waitFor(() => expect(getTestRouter().replace).toHaveBeenCalled());
+  expect(getTestRouter().replace).toHaveBeenCalledWith(expect.not.stringContaining('connection='));
+});
+
+// The account list can be minutes old. An account disconnected since then must not leave the
+// page saying no ad account is connected while others are.
+test('falls back from a chosen ad account that was disconnected after the list was read', async () => {
+  ads.connections = [
+    { ...ACCOUNT, id: 'conn-2', name: 'Umami EU', accountId: '9876543210' },
+    { ...ACCOUNT, id: 'conn-1', name: 'Umami', accountId: '1234567890' },
+  ];
+  respondWith({ date: [] });
+  const report = vi.mocked(httpGet).getMockImplementation();
+  vi.mocked(httpGet).mockImplementation(async (url, params) =>
+    (params as { connectionId?: string })?.connectionId === 'conn-2'
+      ? { ok: false, status: 404, data: { error: { code: 'not_connected', status: 404 } } }
+      : report?.(url, params),
+  );
+  const isListRequest = ([url]: unknown[]) =>
+    String(url).endsWith('/api/integrations/ads/connections');
+
+  render(<GoogleAdsPage websiteId="site-1" />, { route: '/?connection=conn-2' });
+
+  await waitFor(() =>
+    expect(getTestRouter().replace).toHaveBeenCalledWith(
+      expect.not.stringContaining('connection='),
+    ),
+  );
+  // The list is read again so the dropdown stops offering the disconnected account.
+  await waitFor(() => expect(vi.mocked(httpGet).mock.calls.filter(isListRequest)).toHaveLength(2));
+  expect(screen.queryByText('Connect an ad account')).not.toBeInTheDocument();
 });

@@ -53,7 +53,7 @@ The connection URL format:
 postgresql://username:mypassword@localhost:5432/mydb
 ```
 
-When Umami is served over HTTPS, add `COOKIE_SECURE=1` so that the session cookie is only sent over HTTPS.
+The session cookie is marked Secure when a request arrives over HTTPS, directly or through a reverse proxy that sets `X-Forwarded-Proto: https`. Set `COOKIE_SECURE=1` to mark it Secure on every request, or `COOKIE_SECURE=0` to never mark it.
 
 To let users sign in through an OpenID Connect provider, add:
 
@@ -70,10 +70,13 @@ Register `https://<your-umami-host>/api/auth/callback/oidc` as the redirect URI 
 | `OIDC_PROVIDER_NAME` | `SSO` | Name shown on the login button |
 | `OIDC_SCOPES` | `openid profile email` | Scopes to request |
 | `OIDC_DISABLE_SIGNUP` | | Set to `1` to only allow users who have linked their account |
+| `OIDC_DISABLE_PROVIDER_LOGOUT` | | Set to `1` to end only the Umami session on logout |
 
 A first sign-in creates a user with the `user` role. Existing users link their provider account under **Settings → Security**.
 
-Behind a reverse proxy, the redirect URI is built from the `X-Forwarded-Host` and `X-Forwarded-Proto` headers. Set `BETTER_AUTH_URL=https://<your-umami-host>` if the proxy does not send them.
+When a user who signed in through the provider logs out, Umami also ends their session at the provider, if its discovery document has an `end_session_endpoint`. The provider then sends them back to `https://<your-umami-host>/login`, which must be registered with the provider as a valid post-logout redirect URI. Users who signed in with a password are logged out of Umami only.
+
+Behind a reverse proxy, the redirect URI and the post-logout redirect URI are built from the `X-Forwarded-Host` and `X-Forwarded-Proto` headers. Set `BETTER_AUTH_URL=https://<your-umami-host>` if the proxy does not send them.
 
 ### Build the Application
 

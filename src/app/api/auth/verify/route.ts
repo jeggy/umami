@@ -1,3 +1,4 @@
+import { refreshUserSession } from '@/lib/auth-server';
 import { addTeamBillingStatus } from '@/lib/load';
 import { parseRequest } from '@/lib/request';
 import { json } from '@/lib/response';
@@ -10,7 +11,13 @@ export async function POST(request: Request) {
     return error();
   }
 
+  // The app calls this route on every page load, so it is where an active session is extended.
+  const headers = auth.authType === 'session' ? await refreshUserSession(request) : undefined;
+
   const teams = await addTeamBillingStatus(await getAllUserTeams(auth.user.id));
 
-  return json({ ...auth.user, passwordChangeRequired: !!auth.passwordChangeRequired, teams });
+  return json(
+    { ...auth.user, passwordChangeRequired: !!auth.passwordChangeRequired, teams },
+    { headers },
+  );
 }

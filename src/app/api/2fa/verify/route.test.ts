@@ -147,7 +147,7 @@ test('POST accepts a token-only payload and completes 2FA verification', async (
   expect(mocks.claimOtp).toHaveBeenCalledWith('user-1', '123456');
   expect(mocks.resetRateLimit).toHaveBeenCalledWith('user-1');
   // The full session replaces the partial token: as a cookie and as a bearer token.
-  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1');
+  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1', undefined);
   expect(response.headers.get('set-cookie')).toBe('umami.session_token=full-auth-token');
   const data = await response.json();
   expect(data).toMatchObject({
@@ -159,6 +159,24 @@ test('POST accepts a token-only payload and completes 2FA verification', async (
   });
   expect(data.user).not.toHaveProperty('password');
   expect(response.status).toBe(200);
+});
+
+test('POST records the provider of a sign-in that began at an external provider', async () => {
+  mocks.parseSecureToken.mockReturnValue({
+    type: 'partial-auth',
+    userId: 'user-1',
+    providerId: 'oidc',
+  });
+
+  await POST(
+    new Request('http://localhost/api/2fa/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer partial-token' },
+      body: JSON.stringify({ token: '123456' }),
+    }),
+  );
+
+  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1', 'oidc');
 });
 
 test('POST returns a configuration error when the encryption key is missing', async () => {

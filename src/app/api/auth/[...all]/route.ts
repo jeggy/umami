@@ -1,7 +1,8 @@
 import { toNextJsHandler } from 'better-auth/next-js';
 import { checkAuth } from '@/lib/auth';
-import { getAuth } from '@/lib/auth-server';
-import { OIDC_PROVIDER_ID } from '@/lib/constants';
+import { withSecureCookies } from '@/lib/auth-cookies';
+import { getAuth, withClientIp } from '@/lib/auth-server';
+import { CREDENTIAL_PROVIDER_ID } from '@/lib/constants';
 import prisma from '@/lib/prisma';
 import { badRequest, notFound, unauthorized } from '@/lib/response';
 
@@ -42,7 +43,7 @@ async function isAllowedBody(path: string, request: Request) {
       where: { id: String(body?.accountId) },
     });
 
-    return account?.providerId === OIDC_PROVIDER_ID;
+    return !!account && account.providerId !== CREDENTIAL_PROVIDER_ID;
   }
 
   return true;
@@ -72,7 +73,20 @@ async function handle(request: Request) {
   // builds the callback URL that the external provider redirects back to from it.
   url.pathname = `${BASE_PATH}${url.pathname}`;
 
-  return getAuth().handler(new Request(url, request));
+  const response = await (await getAuth()).handler(
+    new Request(url, {
+      method: request.method,
+      headers: withClientIp(request.headers),
+      body: request.body,
+      duplex: 'half',
+    } as RequestInit),
+  );
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: withSecureCookies(request, response.headers),
+  });
 }
 
 export const { GET, POST } = toNextJsHandler(handle);
