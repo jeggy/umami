@@ -20,9 +20,11 @@ import { PasswordChangeButton } from './PasswordChangeButton';
 
 export function UserSecurityPage() {
   const { t, labels, messages } = useMessages();
-  const { cloudMode, oidcEnabled } = useConfig();
+  const { cloudMode, oidcProviders } = useConfig();
   const { data: status, isLoading } = useTwoFactorStatusQuery(true);
-  const { data: accounts, isLoading: isLoadingAccounts } = useLinkedAccountsQuery(!!oidcEnabled);
+  const { data: accounts, isLoading: isLoadingAccounts } = useLinkedAccountsQuery(
+    oidcProviders.length > 0,
+  );
   const queryClient = useQueryClient();
   const [showSetup, setShowSetup] = useState(false);
   const [showDisable, setShowDisable] = useState(false);
@@ -72,7 +74,9 @@ export function UserSecurityPage() {
             </Column>
           </Panel>
         )}
-        <ExternalAccountPanel />
+        {oidcProviders.map(provider => (
+          <ExternalAccountPanel key={provider.slug} provider={provider} />
+        ))}
         <Panel>
           <Column gap="4">
             <Row alignItems="center" gap="3">

@@ -43,6 +43,26 @@ export const operationDescriptions: Record<string, OperationDescription> = {
     description:
       'Enables or disables the installation-wide requirement for users to set up two-factor authentication.',
   },
+  'GET /api/admin/oidc-providers': {
+    summary: 'List OIDC providers',
+    description:
+      'Returns every OIDC provider with its group mapping, which settings environment variables set, and the groups the latest sign-in sent. Client secrets are reported only as set, missing or unreadable.',
+  },
+  'POST /api/admin/oidc-providers': {
+    summary: 'Add an OIDC provider',
+    description:
+      'Adds an OIDC provider that users can sign in through, with its group mapping. The client secret is stored encrypted.',
+  },
+  'POST /api/admin/oidc-providers/{slug}': {
+    summary: 'Update an OIDC provider',
+    description:
+      'Changes the settings of an OIDC provider. Settings left out keep their value, and given mappings replace the old ones. Settings an environment variable sets are not changed.',
+  },
+  'DELETE /api/admin/oidc-providers/{slug}': {
+    summary: 'Remove an OIDC provider',
+    description:
+      'Removes a stored OIDC provider and its group mapping. Accounts linked through it stay, and work again if a provider with the same slug is added.',
+  },
   'GET /api/admin/teams': {
     summary: 'List all teams',
     description:
@@ -84,7 +104,8 @@ export const operationDescriptions: Record<string, OperationDescription> = {
   },
   'POST /api/auth/logout': {
     summary: 'Log out',
-    description: 'Ends the current authentication session and clears its cookie.',
+    description:
+      'Ends the current authentication session and clears its cookie. For a session that came from an OpenID Connect provider, it also returns the URL that ends the session at the provider.',
   },
   'POST /api/auth/sso': {
     summary: 'Create a single sign-on token',
@@ -619,6 +640,21 @@ export const operationDescriptions: Record<string, OperationDescription> = {
     description:
       'Returns visitor counts and drop-off for each step of a saved funnel over the selected date range, with optional filters.',
   },
+  'GET /api/websites/{websiteId}/funnels/{funnelId}/chart': {
+    summary: 'Get website saved funnel chart',
+    description:
+      'Returns, for each time bucket, how many sessions entered a saved funnel and how many of them reached its last step, grouped by when they entered.',
+  },
+  'GET /api/websites/{websiteId}/funnels/{funnelId}/times': {
+    summary: 'Get website saved funnel times',
+    description:
+      'Returns the median time in seconds between consecutive steps of a saved funnel, and from the first step to the last, for sessions that reached each step.',
+  },
+  'GET /api/websites/{websiteId}/funnels/{funnelId}/breakdown': {
+    summary: 'Get website saved funnel breakdown',
+    description:
+      'Returns visitor counts for each step of a saved funnel split by a session attribute (browser, os, device, or country), for the most common values.',
+  },
   'GET /api/websites/{websiteId}/funnels/stats': {
     summary: 'Get website funnel stats',
     description:
@@ -653,6 +689,21 @@ export const operationDescriptions: Record<string, OperationDescription> = {
     summary: 'Get website saved goal stats',
     description:
       'Returns the number of conversions and the total for a saved goal over the selected date range, with optional filters.',
+  },
+  'GET /api/websites/{websiteId}/goals/{goalId}/chart': {
+    summary: 'Get website saved goal chart',
+    description:
+      'Returns, for each time bucket, how many sessions started and how many of them reached a saved goal, grouped by their first event.',
+  },
+  'GET /api/websites/{websiteId}/goals/{goalId}/summary': {
+    summary: 'Get website saved goal summary',
+    description:
+      'Returns the number of events that matched a saved goal, and the median time in seconds from a session start to its first match.',
+  },
+  'GET /api/websites/{websiteId}/goals/{goalId}/breakdown': {
+    summary: 'Get website saved goal breakdown',
+    description:
+      'Returns visitors and converted visitors for a saved goal split by a session attribute (browser, os, device, or country), for the most common values.',
   },
   'GET /api/websites/{websiteId}/goals/stats': {
     summary: 'Get website goal stats',

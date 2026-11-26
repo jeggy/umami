@@ -29,7 +29,7 @@ export default async function ({ children }) {
   // Force request-time rendering so config reflects runtime env, not build-time env.
   await connection();
 
-  const config = getConfig();
+  const config = await getConfig();
   const flags = await getFlagValues();
 
   return (

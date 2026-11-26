@@ -51,8 +51,7 @@ class UmamiRedisClient {
     return this.client.set(key, JSON.stringify(value), { EX: ttl });
   }
 
-  // The raw helpers skip the JSON encoding and the default TTL: better-auth
-  // stores plain strings and writes some keys without an expiry.
+  // The raw helpers back better-auth's secondary storage (src/lib/auth-server.ts).
   async getRaw(key: string) {
     await this.connect();
 

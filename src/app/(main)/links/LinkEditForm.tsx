@@ -1,12 +1,10 @@
 import {
   Button,
-  Column,
   Form,
   FormField,
   FormSubmitButton,
   Grid,
   Icon,
-  Label,
   Loading,
   Row,
   TextField,
@@ -17,7 +15,7 @@ import { useUpdateQuery } from '@/components/hooks/queries/useUpdateQuery';
 import { RefreshCw } from '@/components/icons';
 import { LINKS_URL } from '@/lib/constants';
 import { getRandomChars } from '@/lib/generate';
-import { isValidUrl } from '@/lib/url';
+import { isValidLinkUrl } from '@/lib/url';
 
 const generateId = () => getRandomChars(9);
 
@@ -60,7 +58,7 @@ export function LinkEditForm({
   };
 
   const checkUrl = (url: string, formValues: any) => {
-    if (!isValidUrl(url) || (url === `${hostUrl}/${formValues.slug}`)) {
+    if (!isValidLinkUrl(url, cloudMode) || url === `${hostUrl}/${formValues.slug}`) {
       return t(labels.invalidUrl);
     }
     return true;
@@ -125,18 +123,13 @@ export function LinkEditForm({
               </Grid>
             )}
 
-            <Column gap="1">
-              <Label>{t(labels.link)}</Label>
-              <Row alignItems="center" gap>
-                <TextField
-                  value={`${hostUrl}/${slug}`}
-                  autoComplete="off"
-                  isReadOnly
-                  allowCopy
-                  style={{ width: '100%' }}
-                />
-              </Row>
-            </Column>
+            <TextField
+              label={t(labels.link)}
+              value={`${hostUrl}/${slug}`}
+              autoComplete="off"
+              isReadOnly
+              allowCopy
+            />
 
             <Row justifyContent="flex-end" paddingTop="3" gap="3">
               {onClose && (

@@ -116,7 +116,8 @@ export async function createUser(data: {
       username,
       displayUsername: username,
       displayName: username,
-      email: getPlaceholderEmail(id),
+      // Users have no real email address unless an external provider supplies one.
+      email: `${id}@placeholder.local`,
       role,
       accounts: {
         create: {
@@ -133,11 +134,6 @@ export async function createUser(data: {
       role: true,
     },
   });
-}
-
-/** Users have no real email address unless an external provider supplies one. */
-function getPlaceholderEmail(userId: string) {
-  return `${userId}@placeholder.local`;
 }
 
 export async function updateUser(userId: string, data: Prisma.UserUpdateInput) {

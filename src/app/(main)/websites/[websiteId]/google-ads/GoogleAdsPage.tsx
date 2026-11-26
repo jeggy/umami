@@ -1,8 +1,9 @@
 'use client';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button, Column, Heading, Loading, Tab, TabList, TabPanel, Tabs } from '@umami/react-zen';
 import { differenceInCalendarDays, format } from 'date-fns';
 import { useTranslations } from 'next-intl';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { WebsiteControls } from '@/app/(main)/websites/[websiteId]/WebsiteControls';
 import { EmptyPlaceholder } from '@/components/common/EmptyPlaceholder';
 import { LoadingPanel } from '@/components/common/LoadingPanel';
@@ -14,6 +15,7 @@ import {
   useGoogleAdsQuery,
   useLocale,
   useMessages,
+  useNavigation,
   useSubscription,
   useTimezone,
   useWebsite,
@@ -21,6 +23,7 @@ import {
 import { Megaphone } from '@/components/icons';
 import { MetricCard } from '@/components/metrics/MetricCard';
 import { MetricsBar } from '@/components/metrics/MetricsBar';
+import { AdsConnectionSelect } from './AdsConnectionSelect';
 import {
   formatMetric,
   GOOGLE_ADS_METRICS,
@@ -31,7 +34,7 @@ import {
 } from './format';
 import { GoogleAdsChart } from './GoogleAdsChart';
 import { GoogleAdsConversionsTable } from './GoogleAdsConversionsTable';
-import { GoogleAdsTable } from './GoogleAdsTable';
+import { GoogleAdsTable, type GoogleAdsTableFilter } from './GoogleAdsTable';
 
 const INTEGRATIONS_URL = `${process.env.cloudUrl || ''}/settings/integrations`;
 
@@ -50,6 +53,9 @@ const CONVERSION_METRICS: GoogleAdsMetric[] = [
 
 export function GoogleAdsPage({ websiteId }: { websiteId: string }) {
   const website = useWebsite();
+  const {
+    query: { connection },
+  } = useNavigation();
   const { hasFeature, cloudMode, isLoading } = useSubscription(website?.teamId);
   const isAllowed = !cloudMode || hasFeature('googleAds');
 
@@ -61,11 +67,12 @@ export function GoogleAdsPage({ websiteId }: { websiteId: string }) {
     return <UpgradePlaceholder />;
   }
 
-  return <GoogleAdsReport websiteId={websiteId} />;
+  // Campaign filters, tabs and table state belong to one ad account; switching starts afresh.
+  return <GoogleAdsReport key={connection ?? ''} websiteId={websiteId} />;
 }
 
 function UpgradePlaceholder() {
-  const t = useTranslations('googleAds');
+  const t = useTranslations('ads');
   const { t: tm, labels, messages } = useMessages();
 
   return (
@@ -87,7 +94,13 @@ function UpgradePlaceholder() {
 }
 
 function GoogleAdsReport({ websiteId }: { websiteId: string }) {
-  const t = useTranslations('googleAds');
+  const t = useTranslations('ads');
+  const queryClient = useQueryClient();
+  const {
+    router,
+    query: { connection },
+    updateParams,
+  } = useNavigation();
   const { timezone } = useTimezone();
   const {
     dateRange: { startDate: rangeStart, endDate: rangeEnd, unit },
@@ -97,6 +110,9 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
   } = useDateRange({ timezone });
   const [performanceMetric, setPerformanceMetric] = useState<GoogleAdsMetric>('cost');
   const [conversionMetric, setConversionMetric] = useState<GoogleAdsMetric>('conversions');
+  const [tab, setTab] = useState('campaign');
+  // Set by opening a campaign or ad group; it narrows the tabs below that level.
+  const [filter, setFilter] = useState<GoogleAdsTableFilter | null>(null);
 
   // Google reports whole days, so the page works in calendar days. useDateRange returns new
   // Date objects on every render (and relative ranges move with the clock), so keying the
@@ -136,10 +152,22 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
   const previousRows = canCompare ? previous.data?.rows : undefined;
   const currency = daily.data?.currencyCode ?? null;
 
+  // The chosen account was disconnected since the account list was read: report on the
+  // default instead, and re-read the list so the dropdown drops it too.
+  const isChosenGone = !!connection && daily.error?.code === 'not_connected';
+  useEffect(() => {
+    if (isChosenGone) {
+      queryClient.invalidateQueries({ queryKey: ['ads-connections', { websiteId }] });
+      router.replace(updateParams({ connection: undefined }));
+    }
+  }, [isChosenGone]);
+
   const setupProblem = getSetupProblem(daily.error);
   let placeholder = null;
 
-  if (isRangeTooLong) {
+  if (isChosenGone) {
+    placeholder = <Loading placement="absolute" />;
+  } else if (isRangeTooLong) {
     placeholder = (
       <Panel>
         <EmptyPlaceholder
@@ -159,6 +187,7 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
   return (
     <Column gap>
       <WebsiteControls websiteId={websiteId} allowFilter={false} />
+      <AdsConnectionSelect websiteId={websiteId} />
       {placeholder || (
         <>
           <LoadingPanel
@@ -243,11 +272,15 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
           </Panel>
           <Heading size="2xl">{t('ads')}</Heading>
           <Panel>
-            <Tabs>
+            <Tabs selectedKey={tab} onSelectionChange={setTab}>
               <TabList>
                 <Tab id="campaign">{t('campaigns')}</Tab>
                 <Tab id="ad_group">{t('adGroups')}</Tab>
                 <Tab id="keyword">{t('keywords')}</Tab>
+                <Tab id="search_term">{t('searchTerms')}</Tab>
+                <Tab id="landing_page">{t('landingPages')}</Tab>
+                <Tab id="device">{t('devices')}</Tab>
+                <Tab id="network">{t('networks')}</Tab>
               </TabList>
               <TabPanel id="campaign">
                 <GoogleAdsTable
@@ -255,6 +288,10 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
                   startDate={startDate}
                   endDate={endDate}
                   dimension="campaign"
+                  onDrill={row => {
+                    setFilter({ type: 'campaign', id: row.key, name: row.name });
+                    setTab('ad_group');
+                  }}
                 />
               </TabPanel>
               <TabPanel id="ad_group">
@@ -263,6 +300,12 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
                   startDate={startDate}
                   endDate={endDate}
                   dimension="ad_group"
+                  filter={filter}
+                  onClearFilter={() => setFilter(null)}
+                  onDrill={row => {
+                    setFilter({ type: 'adGroup', id: row.key, name: row.name });
+                    setTab('keyword');
+                  }}
                 />
               </TabPanel>
               <TabPanel id="keyword">
@@ -271,8 +314,30 @@ function GoogleAdsReport({ websiteId }: { websiteId: string }) {
                   startDate={startDate}
                   endDate={endDate}
                   dimension="keyword"
+                  filter={filter}
+                  onClearFilter={() => setFilter(null)}
                 />
               </TabPanel>
+              <TabPanel id="search_term">
+                <GoogleAdsTable
+                  websiteId={websiteId}
+                  startDate={startDate}
+                  endDate={endDate}
+                  dimension="search_term"
+                  filter={filter}
+                  onClearFilter={() => setFilter(null)}
+                />
+              </TabPanel>
+              {(['landing_page', 'device', 'network'] as const).map(dimension => (
+                <TabPanel key={dimension} id={dimension}>
+                  <GoogleAdsTable
+                    websiteId={websiteId}
+                    startDate={startDate}
+                    endDate={endDate}
+                    dimension={dimension}
+                  />
+                </TabPanel>
+              ))}
             </Tabs>
           </Panel>
         </>
@@ -303,7 +368,7 @@ function GoogleAdsMetricCards({
   selected: GoogleAdsMetric;
   onSelect: (metric: GoogleAdsMetric) => void;
 }) {
-  const t = useTranslations('googleAds');
+  const t = useTranslations('ads');
   const { locale } = useLocale();
   const totals = sumRows(rows);
   const previousTotals = previousRows ? sumRows(previousRows) : null;
@@ -364,7 +429,7 @@ function getSetupProblem(error?: GoogleAdsQueryError | null): SetupProblem | nul
 }
 
 function GoogleAdsPlaceholder({ problem }: { problem: SetupProblem }) {
-  const t = useTranslations('googleAds');
+  const t = useTranslations('ads');
 
   return (
     <Panel>

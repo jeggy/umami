@@ -4,34 +4,48 @@ import { useState } from 'react';
 import { Badge } from '@/components/common/Badge';
 import { Panel } from '@/components/common/Panel';
 import { useApi, useConfig, useLinkedAccountsQuery, useMessages } from '@/components/hooks';
-import { CREDENTIAL_PROVIDER_ID, OIDC_PROVIDER_ID } from '@/lib/constants';
+import { CREDENTIAL_PROVIDER_ID } from '@/lib/constants';
 
-export function ExternalAccountPanel() {
+function hasLinkError(slug: string) {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return params.has('error') && params.get('provider') === slug;
+}
+
+export function ExternalAccountPanel({ provider }: { provider: { slug: string; name: string } }) {
+  const { slug, name } = provider;
   const { t, labels, messages } = useMessages();
-  const { oidcEnabled, oidcProviderName: name } = useConfig();
+  const { oidcProviders } = useConfig();
   const { post } = useApi();
-  const { data: accounts, refetch } = useLinkedAccountsQuery(oidcEnabled);
+  const { data: accounts, refetch } = useLinkedAccountsQuery(true);
   // The provider redirects back here with an error code when linking fails.
-  const [linkFailed, setLinkFailed] = useState(
-    () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('error'),
-  );
+  const [linkFailed, setLinkFailed] = useState(() => hasLinkError(slug));
 
-  if (!oidcEnabled || !accounts) {
+  if (!accounts) {
     return null;
   }
 
-  const account = accounts.find(({ providerId }) => providerId === OIDC_PROVIDER_ID);
+  const account = accounts.find(({ providerId }) => providerId === slug);
   // Unlinking the only way to sign in would lock the user out.
-  const canUnlink = accounts.some(({ providerId }) => providerId === CREDENTIAL_PROVIDER_ID);
+  const canUnlink = accounts.some(
+    ({ id, providerId }) =>
+      id !== account?.id &&
+      (providerId === CREDENTIAL_PROVIDER_ID ||
+        oidcProviders.some(provider => provider.slug === providerId)),
+  );
 
   const handleLink = async () => {
     const returnUrl = `${process.env.basePath || ''}/settings/security`;
 
     try {
       const { url } = await post('/auth/link-social', {
-        provider: OIDC_PROVIDER_ID,
+        provider: slug,
         callbackURL: returnUrl,
-        errorCallbackURL: returnUrl,
+        errorCallbackURL: `${returnUrl}?provider=${encodeURIComponent(slug)}`,
       });
 
       window.location.href = url;
