@@ -6,6 +6,7 @@ import { twoFactorChallenge } from '@/lib/auth-plugins/two-factor-challenge';
 import { umamiSession } from '@/lib/auth-plugins/umami-session';
 import { AUTH_SESSION_TTL, OIDC_PROVIDER_ID, ROLES } from '@/lib/constants';
 import { secret, uuid } from '@/lib/crypto';
+import { parseBooleanEnv } from '@/lib/env';
 import { getOidcConfig, isOidcConfigured } from '@/lib/oidc';
 import { checkPassword, hashPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
@@ -58,6 +59,10 @@ function createAuth() {
     // src/app/api/auth/[...all]/route.ts).
     basePath: `${process.env.basePath || ''}/api/auth`,
     trustedOrigins: [process.env.CLOUD_URL].filter(Boolean),
+    // A provider sign-in that fails before better-auth knows where to send the user, such as one
+    // with an expired state, lands on the login page with its error code instead of better-auth's
+    // own error page.
+    onAPIError: { errorURL: `${process.env.basePath || ''}/login` },
     database: prismaAdapter(prisma.client, { provider: 'postgresql' }),
     emailAndPassword: {
       enabled: true,
@@ -145,9 +150,9 @@ function createAuth() {
       // better-auth marks cookies Secure whenever NODE_ENV is production, which
       // breaks self-hosted installs served over plain http. Opt in with
       // COOKIE_SECURE=1; the default follows CLOUD_URL.
-      useSecureCookies: process.env.COOKIE_SECURE
-        ? !['0', 'false'].includes(process.env.COOKIE_SECURE)
-        : (process.env.CLOUD_URL || '').startsWith('https://'),
+      useSecureCookies:
+        parseBooleanEnv(process.env.COOKIE_SECURE) ??
+        (process.env.CLOUD_URL || '').startsWith('https://'),
     },
     plugins: [
       // The casts work around plugin types that need strictNullChecks, which

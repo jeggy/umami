@@ -34,6 +34,12 @@ export interface BarChartProps extends ChartProps {
   YAxisType?: string;
   minDate?: Date;
   maxDate?: Date;
+  /**
+   * For data that comes in whole periods, such as daily ad or search data. A range within one
+   * period gives the axis no width, so Chart.js adds ticks a millisecond either side of it,
+   * labelled with the neighbouring dates. Only the period's own tick is labelled instead.
+   */
+  fitSinglePeriod?: boolean;
   /** Called with the start of the clicked bar's time bucket. */
   onBarClick?: (date: Date) => void;
 }
@@ -54,6 +60,7 @@ function BarChartComponent({
   stacked = false,
   minDate,
   maxDate,
+  fitSinglePeriod,
   currency,
   formatValue,
   onBarClick,
@@ -67,21 +74,40 @@ function BarChartComponent({
   const onBarClickRef = useRef(onBarClick);
   onBarClickRef.current = onBarClick;
   const isClickable = !!onBarClick;
+  // Touch has no hover, so the first tap on a bar shows its tooltip and a second tap drills in.
+  const tappedTimeRef = useRef<number | null>(null);
 
   const chartOptions: any = useMemo(() => {
+    const min = formatDate(minDate, DATE_FORMATS[unit], locale);
+    const max = formatDate(maxDate, DATE_FORMATS[unit], locale);
+
     return {
       __id: Date.now(),
       ...(isClickable && {
-        onClick: (event: { native?: { target?: HTMLElement } }, elements: { index: number }[]) => {
-          if (elements.length) {
-            // The canvas is reused, and the next view may not be clickable.
-            if (event.native?.target) {
-              event.native.target.style.cursor = 'default';
-            }
-            // Buckets are generated from minDate, so the index gives the bar's date.
-            const { add, start } = DATE_FUNCTIONS[unit];
-            onBarClickRef.current?.(add(start(minDate), elements[0].index));
+        onClick: (
+          event: { native?: { target?: HTMLElement; pointerType?: string } },
+          elements: { index: number }[],
+        ) => {
+          if (!elements.length) {
+            tappedTimeRef.current = null;
+            return;
           }
+
+          // Buckets are generated from minDate, so the index gives the bar's date.
+          const { add, start } = DATE_FUNCTIONS[unit];
+          const date = add(start(minDate), elements[0].index);
+
+          if (isTouch(event.native) && tappedTimeRef.current !== date.getTime()) {
+            tappedTimeRef.current = date.getTime();
+            return;
+          }
+
+          tappedTimeRef.current = null;
+          // The canvas is reused, and the next view may not be clickable.
+          if (event.native?.target) {
+            event.native.target.style.cursor = 'default';
+          }
+          onBarClickRef.current?.(date);
         },
         onHover: (event: { native?: { target?: HTMLElement } }, elements: unknown[]) => {
           if (event.native?.target) {
@@ -93,8 +119,8 @@ function BarChartComponent({
         x: {
           type: XAxisType,
           stacked: true,
-          min: formatDate(minDate, DATE_FORMATS[unit], locale),
-          max: formatDate(maxDate, DATE_FORMATS[unit], locale),
+          min,
+          max,
           offset: true,
           time: {
             unit,
@@ -109,7 +135,14 @@ function BarChartComponent({
             color: colors.chart.text,
             autoSkip: false,
             maxRotation: 0,
-            callback: renderXLabel,
+            callback:
+              fitSinglePeriod && min === max && renderXLabel
+                ? (label: string, index: number, values: any[]) =>
+                    DATE_FUNCTIONS[unit].start(values[index].value).getTime() ===
+                    values[index].value
+                      ? renderXLabel(label, index, values)
+                      : ''
+                : renderXLabel,
           },
         },
         y: {
@@ -138,6 +171,7 @@ function BarChartComponent({
     renderYLabel,
     minDate,
     maxDate,
+    fitSinglePeriod,
     locale,
     XAxisType,
     YAxisType,
@@ -188,6 +222,16 @@ function BarChartComponent({
       {tooltip && <ChartTooltip {...tooltip} />}
     </>
   );
+}
+
+// Click events are PointerEvents in current browsers. Older ones only say whether the device
+// can hover.
+function isTouch(event?: { pointerType?: string }) {
+  if (event?.pointerType) {
+    return event.pointerType === 'touch';
+  }
+
+  return typeof window !== 'undefined' && window.matchMedia?.('(hover: none)').matches;
 }
 
 export const BarChart = memo(BarChartComponent);
