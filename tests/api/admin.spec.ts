@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures';
 import { login } from './helpers/auth';
-import { UNKNOWN_UUID } from './helpers/constants';
+import { ROLES, UNKNOWN_UUID } from './helpers/constants';
 import { createTeam, createUser, deleteTeam, deleteUser } from './helpers/entities';
 
 test.describe('Admin', () => {
@@ -440,6 +440,132 @@ test.describe('Admin', () => {
 
       expect(confirm.status).toBe(400);
       expect(confirm.body.error.code).toBe('two-factor-error-no-pending-setup');
+    });
+  });
+
+  test.describe('OIDC providers', () => {
+    test.describe.configure({ mode: 'serial' });
+
+    const slug = 'api-spec-idp';
+    let teamId = '';
+
+    test.beforeAll(async ({ admin }) => {
+      teamId = (await createTeam(admin)).id;
+    });
+
+    test.afterAll(async ({ admin }) => {
+      await admin.del(`/api/admin/oidc-providers/${slug}`);
+
+      if (teamId) {
+        await deleteTeam(admin, teamId);
+      }
+    });
+
+    test('the OIDC provider routes require an admin session', async ({
+      api,
+      user,
+      viewer,
+      apiKey,
+    }) => {
+      for (const client of [api, user, viewer, apiKey]) {
+        expect((await client.get('/api/admin/oidc-providers')).status).toBe(401);
+        expect((await client.post('/api/admin/oidc-providers', { slug, name: 'IdP' })).status).toBe(
+          401,
+        );
+        expect((await client.post(`/api/admin/oidc-providers/${slug}`, {})).status).toBe(401);
+        expect((await client.del(`/api/admin/oidc-providers/${slug}`)).status).toBe(401);
+      }
+    });
+
+    test('POST /api/admin/oidc-providers validates the provider ID', async ({ admin }) => {
+      const uppercase = await admin.post('/api/admin/oidc-providers', { slug: 'IdP', name: 'IdP' });
+      const reserved = await admin.post('/api/admin/oidc-providers', {
+        slug: 'credential',
+        name: 'IdP',
+      });
+
+      expect(uppercase.status).toBe(400);
+      expect(reserved.status).toBe(400);
+    });
+
+    test('POST /api/admin/oidc-providers adds a provider and never returns its secret', async ({
+      admin,
+    }) => {
+      const created = await admin.post('/api/admin/oidc-providers', {
+        slug,
+        name: 'API spec IdP',
+        discoveryUrl: 'https://idp.example.com/.well-known/openid-configuration',
+        clientId: 'umami',
+        clientSecret: 'api-spec-client-secret',
+      });
+      const duplicate = await admin.post('/api/admin/oidc-providers', { slug, name: 'Again' });
+      const listed = await admin.get('/api/admin/oidc-providers');
+
+      expect(created.status).toBe(200);
+      expect(created.body).toMatchObject({
+        slug,
+        name: 'API spec IdP',
+        clientSecret: 'set',
+        mappings: [],
+        stored: true,
+      });
+      expect(created.text).not.toContain('api-spec-client-secret');
+      expect(duplicate.status).toBe(400);
+      expect(listed.status).toBe(200);
+      expect(listed.body.providers.map((provider: any) => provider.slug)).toContain(slug);
+      expect(listed.text).not.toContain('api-spec-client-secret');
+    });
+
+    test('POST /api/admin/oidc-providers/{slug} saves settings and group mappings', async ({
+      admin,
+    }) => {
+      const mappings = [
+        { group: '/umami-admins', role: ROLES.admin, teamId: null, teamRole: null },
+        { group: '/staff/devs', role: null, teamId, teamRole: ROLES.teamMember },
+      ];
+
+      const updated = await admin.post(`/api/admin/oidc-providers/${slug}`, {
+        groupsClaim: 'roles',
+        mappings,
+      });
+      const missingTeam = await admin.post(`/api/admin/oidc-providers/${slug}`, {
+        mappings: [{ group: '/x', role: null, teamId: UNKNOWN_UUID, teamRole: ROLES.teamMember }],
+      });
+      const teamWithoutRole = await admin.post(`/api/admin/oidc-providers/${slug}`, {
+        mappings: [{ group: '/x', role: null, teamId, teamRole: null }],
+      });
+      const unknown = await admin.post('/api/admin/oidc-providers/no-such-idp', {});
+
+      expect(updated.status).toBe(200);
+      expect(updated.body).toMatchObject({ groupsClaim: 'roles', clientSecret: 'set', mappings });
+      expect(missingTeam.status).toBe(400);
+      expect(teamWithoutRole.status).toBe(400);
+      expect(unknown.status).toBe(404);
+    });
+
+    test('deleting a mapped team keeps the mapping, which still decides who may sign in', async ({
+      admin,
+    }) => {
+      await deleteTeam(admin, teamId);
+      teamId = '';
+
+      const listed = await admin.get('/api/admin/oidc-providers');
+      const provider = listed.body.providers.find((provider: any) => provider.slug === slug);
+
+      expect(provider.mappings).toEqual([
+        { group: '/umami-admins', role: ROLES.admin, teamId: null, teamRole: null },
+        { group: '/staff/devs', role: null, teamId: null, teamRole: null },
+      ]);
+    });
+
+    test('DELETE /api/admin/oidc-providers/{slug} removes a stored provider', async ({ admin }) => {
+      const deleted = await admin.del(`/api/admin/oidc-providers/${slug}`);
+      const again = await admin.del(`/api/admin/oidc-providers/${slug}`);
+      const listed = await admin.get('/api/admin/oidc-providers');
+
+      expect(deleted.status).toBe(200);
+      expect(again.status).toBe(404);
+      expect(listed.body.providers.map((provider: any) => provider.slug)).not.toContain(slug);
     });
   });
 });

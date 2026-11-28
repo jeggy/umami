@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { invalidateOidcProviders } from '@/lib/oidc';
 import { parseRequest } from '@/lib/request';
 import { json, notFound, ok, unauthorized } from '@/lib/response';
 import { canDeleteTeam, canUpdateTeam, canViewTeam } from '@/permissions';
@@ -74,6 +75,8 @@ export async function DELETE(
   }
 
   await deleteTeam(teamId);
+  // The provider cache still holds the deleted team in its group mappings.
+  invalidateOidcProviders();
 
   return ok();
 }

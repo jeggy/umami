@@ -15,7 +15,7 @@ export const CACHE_TOKEN_TYPE = 'cache';
 export const PARTIAL_AUTH_TOKEN_TYPE = 'partial-auth';
 export const OIDC_PROVIDER_ID = 'oidc';
 export const CREDENTIAL_PROVIDER_ID = 'credential';
-// Lifetime of an auth session, counted from the sign-in.
+// Lifetime of an auth session since it was last extended. A session in use is extended.
 export const AUTH_SESSION_TTL = 60 * 60 * 24 * 30;
 export const HOMEPAGE_URL = 'https://umami.is';
 export const DOCS_URL = 'https://umami.is/docs';
@@ -74,6 +74,9 @@ export const SESSION_COLUMNS = [
   'region',
   'distinctId',
 ];
+
+// Session attributes funnels and goals can be broken down by; each session has exactly one value.
+export const BREAKDOWN_FIELDS = ['device', 'browser', 'os', 'country'] as const;
 
 export const SEGMENT_TYPES = {
   segment: 'segment',

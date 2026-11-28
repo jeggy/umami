@@ -1,6 +1,6 @@
 import { useApi } from '../useApi';
 
-export interface LinkedAccount {
+interface LinkedAccount {
   id: string;
   providerId: string;
   accountId: string;

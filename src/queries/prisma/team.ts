@@ -249,6 +249,12 @@ export async function deleteTeam(teamId: string) {
         teamId,
       },
     }),
+    // A mapping row also decides who may sign in through its provider, so it stays without the
+    // team. Removing it could leave the provider without mappings, which lets everyone in.
+    client.oidcGroupMapping.updateMany({
+      where: { teamId },
+      data: { teamId: null, teamRole: null },
+    }),
     client.share.deleteMany({ where: { entityId: { in: entityIds } } }),
     client.link.deleteMany({ where: { teamId } }),
     client.pixel.deleteMany({ where: { teamId } }),

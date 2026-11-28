@@ -942,6 +942,9 @@ const operation2 = defineOperation({
                         format: 'date-time',
                         description: 'Date and time the credential expires.',
                       },
+                      providerId: {
+                        type: 'string',
+                      },
                       token: {
                         type: 'string',
                       },
@@ -961,6 +964,7 @@ const operation2 = defineOperation({
                       'createdAt',
                       'updatedAt',
                       'expiresAt',
+                      'providerId',
                       'token',
                       'ipAddress',
                       'userAgent',

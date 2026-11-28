@@ -189,6 +189,23 @@ const operation1 = defineOperation({
           },
         },
       },
+      '403': {
+        description: 'Forbidden.',
+        content: {
+          'application/json': {
+            example: {
+              error: {
+                message: 'Forbidden.',
+                code: 'forbidden',
+                status: 403,
+              },
+            },
+            schema: {
+              $ref: '#/components/schemas/ApiError',
+            },
+          },
+        },
+      },
       '404': {
         description: 'Not found.',
         content: {

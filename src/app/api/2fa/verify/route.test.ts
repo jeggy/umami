@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getBearerToken: vi.fn(),
@@ -17,9 +17,11 @@ const mocks = vi.hoisted(() => ({
   claimOtp: vi.fn(),
   verifyTotp: vi.fn(),
   secret: vi.fn(),
+  applyGroupMapping: vi.fn(),
 }));
 
-vi.mock('@/lib/auth', () => ({
+vi.mock('@/lib/auth', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/auth')>()),
   getBearerToken: mocks.getBearerToken,
 }));
 
@@ -36,6 +38,7 @@ vi.mock('@/lib/jwt', () => ({
 }));
 
 vi.mock('@/queries/prisma', () => ({
+  applyGroupMapping: mocks.applyGroupMapping,
   getAllUserTeams: mocks.getAllUserTeams,
   getUser: mocks.getUser,
 }));
@@ -99,6 +102,7 @@ beforeEach(() => {
   mocks.claimOtp.mockReset();
   mocks.verifyTotp.mockReset();
   mocks.secret.mockReset();
+  mocks.applyGroupMapping.mockReset();
 
   mocks.getBearerToken.mockReturnValue('partial-token');
   mocks.secret.mockReturnValue('app-secret');
@@ -147,7 +151,7 @@ test('POST accepts a token-only payload and completes 2FA verification', async (
   expect(mocks.claimOtp).toHaveBeenCalledWith('user-1', '123456');
   expect(mocks.resetRateLimit).toHaveBeenCalledWith('user-1');
   // The full session replaces the partial token: as a cookie and as a bearer token.
-  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1');
+  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1', undefined);
   expect(response.headers.get('set-cookie')).toBe('umami.session_token=full-auth-token');
   const data = await response.json();
   expect(data).toMatchObject({
@@ -159,6 +163,24 @@ test('POST accepts a token-only payload and completes 2FA verification', async (
   });
   expect(data.user).not.toHaveProperty('password');
   expect(response.status).toBe(200);
+});
+
+test('POST records the provider of a sign-in that began at an external provider', async () => {
+  mocks.parseSecureToken.mockReturnValue({
+    type: 'partial-auth',
+    userId: 'user-1',
+    providerId: 'oidc',
+  });
+
+  await POST(
+    new Request('http://localhost/api/2fa/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer partial-token' },
+      body: JSON.stringify({ token: '123456' }),
+    }),
+  );
+
+  expect(mocks.createUserSession).toHaveBeenCalledWith(expect.any(Request), 'user-1', 'oidc');
 });
 
 test('POST returns a configuration error when the encryption key is missing', async () => {
@@ -232,4 +254,64 @@ test('POST does not check the code when no attempt can be reserved', async () =>
   expect(mocks.verifyTotp).not.toHaveBeenCalled();
   expect(mocks.verifyBackupCode).not.toHaveBeenCalled();
   expect(mocks.createUserSession).not.toHaveBeenCalled();
+});
+
+describe('a partial token from a provider sign-in', () => {
+  const grant = { role: 'view-only', teams: [['team-1', 'team-member']] };
+
+  function verify() {
+    return POST(
+      new Request('http://localhost/api/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer partial-token' },
+        body: JSON.stringify({ token: '123456' }),
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    mocks.parseSecureToken.mockReturnValue({
+      type: 'partial-auth',
+      userId: 'user-1',
+      providerId: 'oidc',
+      grant,
+    });
+  });
+
+  test('applies what the groups grant once the code is right, before the session exists', async () => {
+    mocks.createUserSession.mockImplementation(async () => {
+      expect(mocks.applyGroupMapping).toHaveBeenCalled();
+      return { token: 'full-auth-token', headers: new Headers() };
+    });
+
+    const response = await verify();
+
+    expect(response.status).toBe(200);
+    expect(mocks.applyGroupMapping).toHaveBeenCalledWith('user-1', {
+      allowed: true,
+      role: 'view-only',
+      teams: new Map([['team-1', 'team-member']]),
+    });
+    expect((await response.json()).user).toMatchObject({ role: 'view-only', isAdmin: false });
+  });
+
+  test('is refused when another site sends it from the browser', async () => {
+    const response = await POST(
+      new Request('http://localhost/api/2fa/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain', 'sec-fetch-site': 'cross-site' },
+        body: JSON.stringify({ token: '123456' }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.createUserSession).not.toHaveBeenCalled();
+  });
+
+  test('grants nothing for a wrong code', async () => {
+    mocks.verifyTotp.mockResolvedValue(false);
+
+    expect((await verify()).status).toBe(400);
+    expect(mocks.applyGroupMapping).not.toHaveBeenCalled();
+  });
 });

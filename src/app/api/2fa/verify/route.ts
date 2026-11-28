@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getBearerToken } from '@/lib/auth';
+import { getBearerToken, isCrossSiteRequest } from '@/lib/auth';
 import { createUserSession } from '@/lib/auth-server';
 import { PARTIAL_AUTH_TOKEN_TYPE, ROLES } from '@/lib/constants';
 import { secret } from '@/lib/crypto';
@@ -8,17 +8,25 @@ import { addTeamBillingStatus } from '@/lib/load';
 import { hasDefaultPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
 import { parseRequest } from '@/lib/request';
-import { badRequest, json, notFound, serviceUnavailable, unauthorized } from '@/lib/response';
+import {
+  badRequest,
+  forbidden,
+  json,
+  notFound,
+  serviceUnavailable,
+  unauthorized,
+} from '@/lib/response';
 import { verifyBackupCode } from '@/lib/two-factor/backup-codes';
 import {
   decryptSecret,
   getTwoFactorConfigurationError,
   isTwoFactorConfigured,
 } from '@/lib/two-factor/crypto';
+import { readPartialTokenGrant } from '@/lib/two-factor/partial-token';
 import { reserveAttempt, resetRateLimit } from '@/lib/two-factor/rate-limit';
 import { claimOtp } from '@/lib/two-factor/replay-prevention';
 import { verifyTotp } from '@/lib/two-factor/totp';
-import { getAllUserTeams, getUser } from '@/queries/prisma';
+import { applyGroupMapping, getAllUserTeams, getUser } from '@/queries/prisma';
 
 export async function POST(request: Request) {
   if (process.env.CLOUD_MODE) {
@@ -29,6 +37,10 @@ export async function POST(request: Request) {
     z.object({ token: z.string().length(6) }).strict(),
     z.object({ backupCode: z.string().min(1) }).strict(),
   ]);
+
+  if (isCrossSiteRequest(request)) {
+    return forbidden();
+  }
 
   const rawToken = getBearerToken(request);
   if (!rawToken) {
@@ -131,9 +143,17 @@ export async function POST(request: Request) {
     await resetRateLimit(userId);
   }
 
-  const { id, role, createdAt, username } = user;
+  // What the groups of a provider sign-in grant takes effect only once the second factor is right.
+  const grant = readPartialTokenGrant(payload);
+
+  if (grant) {
+    await applyGroupMapping(userId, grant);
+  }
+
+  const { id, createdAt, username } = user;
+  const role = grant?.role ?? user.role;
   const passwordChangeRequired = hasDefaultPassword(user);
-  const { token: fullToken, headers } = await createUserSession(request, id);
+  const { token: fullToken, headers } = await createUserSession(request, id, payload.providerId);
 
   const teams = await addTeamBillingStatus(await getAllUserTeams(id));
 

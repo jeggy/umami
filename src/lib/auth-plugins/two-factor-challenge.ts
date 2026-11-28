@@ -1,6 +1,7 @@
 import type { BetterAuthPlugin, GenericEndpointContext } from 'better-auth';
 import { createAuthMiddleware } from 'better-auth/api';
 import { deleteSessionCookie } from 'better-auth/cookies';
+import type { GroupMappingResult } from '@/lib/oidc-groups';
 import prisma from '@/lib/prisma';
 import { isTwoFactorConfigured } from '@/lib/two-factor/crypto';
 import { createPartialToken } from '@/lib/two-factor/partial-token';
@@ -12,9 +13,15 @@ const BASE_PATH = process.env.basePath || '';
  *
  * The provider callback has already created a session by the time this runs. For a user with 2FA
  * enabled that session is removed again, and the browser is sent to the two-factor page with the
- * same partial token that the password login returns.
+ * same partial token that the password login returns. `takeGrant` hands over what the provider's
+ * groups grant, which the session hook leaves unapplied for such a user, and the token carries it
+ * to /api/2fa/verify.
  */
-export function twoFactorChallenge() {
+export function twoFactorChallenge({
+  takeGrant,
+}: {
+  takeGrant: (context: object) => GroupMappingResult | undefined;
+}) {
   return {
     id: 'two-factor-challenge',
     hooks: {
@@ -37,6 +44,8 @@ export function twoFactorChallenge() {
               return;
             }
 
+            const grant = takeGrant(ctx.context);
+
             // The cast works around context types that need strictNullChecks, which this project
             // has disabled.
             deleteSessionCookie(ctx as unknown as GenericEndpointContext, true);
@@ -49,7 +58,7 @@ export function twoFactorChallenge() {
 
             // The token travels in the URL fragment, which the browser does not send to a server.
             throw ctx.redirect(
-              `${BASE_PATH}/login/two-factor#token=${encodeURIComponent(createPartialToken(data.user.id))}`,
+              `${BASE_PATH}/login/two-factor#token=${encodeURIComponent(createPartialToken(data.user.id, data.session.providerId, grant))}`,
             );
           }),
         },

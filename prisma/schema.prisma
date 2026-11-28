@@ -51,6 +51,7 @@ model AuthSession {
   ipAddress      String?  @map("ip_address") @db.VarChar(100)
   userAgent      String?  @map("user_agent")
   twoFactorSetup Boolean? @map("two_factor_setup")
+  providerId     String?  @map("provider_id")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -108,6 +109,51 @@ model ApiKey {
 
   @@index([userId])
   @@map("api_key")
+}
+
+// An OIDC provider configured by an administrator. The slug is better-auth's provider id: linked
+// accounts and the callback path /api/auth/callback/<slug> refer to it. The row with slug "oidc"
+// belongs to the provider from the OIDC_* environment variables and holds what they leave unset.
+model OidcProvider {
+  id                    String   @id() @map("oidc_provider_id") @db.Uuid
+  slug                  String   @unique @db.VarChar(50)
+  name                  String?  @db.VarChar(100)
+  discoveryUrl          String?  @map("discovery_url") @db.VarChar(2183)
+  clientId              String?  @map("client_id") @db.VarChar(255)
+  // Encrypted with a key derived from APP_SECRET.
+  clientSecret          String?  @map("client_secret")
+  scopes                String?  @db.VarChar(500)
+  groupsClaim           String   @default("groups") @map("groups_claim") @db.VarChar(100)
+  disableSignup         Boolean  @default(false) @map("disable_signup")
+  disableProviderLogout Boolean  @default(false) @map("disable_provider_logout")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  groupMappings OidcGroupMapping[]
+
+  @@map("oidc_provider")
+}
+
+// Maps one value of a provider's groups claim to an Umami role, a team membership, or both.
+model OidcGroupMapping {
+  id             String   @id() @map("oidc_group_mapping_id") @db.Uuid
+  oidcProviderId String   @map("oidc_provider_id") @db.Uuid
+  group          String   @db.VarChar(255)
+  role           String?  @db.VarChar(50)
+  teamId         String?  @map("team_id") @db.Uuid
+  teamRole       String?  @map("team_role") @db.VarChar(50)
+  // The order the administrator gave the mappings in.
+  position       Int
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  provider OidcProvider @relation(fields: [oidcProviderId], references: [id], onDelete: Cascade)
+  // deleteTeam clears teamId and teamRole first: the group still decides who may sign in.
+  team     Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@index([oidcProviderId])
+  @@index([teamId])
+  @@map("oidc_group_mapping")
 }
 
 model Session {
@@ -297,11 +343,12 @@ model Team {
   updatedAt         DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  websites Website[]
-  members  TeamUser[]
-  links    Link[]
-  pixels   Pixel[]
-  boards   Board[]
+  websites          Website[]
+  members           TeamUser[]
+  links             Link[]
+  pixels            Pixel[]
+  boards            Board[]
+  oidcGroupMappings OidcGroupMapping[]
 
   @@index([accessCode])
   @@map("team")

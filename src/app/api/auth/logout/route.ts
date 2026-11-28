@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     return error();
   }
 
-  const headers = await endUserSession(request);
+  const { headers, redirect } = await endUserSession(request);
 
-  return json({ ok: true }, { headers });
+  return json({ ok: true, redirect }, { headers });
 }

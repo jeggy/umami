@@ -126,6 +126,22 @@ test('POST opens a session and returns it as a cookie and as a token', async () 
   await expect(response.json()).resolves.toMatchObject({ token: 'full-auth-token' });
 });
 
+test('POST refuses a sign-in that another site sends from the browser', async () => {
+  mocks.findTwoFactorAuth.mockResolvedValue(null);
+  const login = (site: string) =>
+    POST(
+      new Request('http://localhost/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain', 'sec-fetch-site': site },
+      }),
+    );
+
+  expect((await login('cross-site')).status).toBe(403);
+  expect((await login('same-site')).status).toBe(403);
+  expect(mocks.createUserSession).not.toHaveBeenCalled();
+  expect((await login('same-origin')).status).toBe(200);
+});
+
 test('POST rejects users who have no password', async () => {
   // A user who only signs in through an external provider has no credential to check.
   mocks.getUserByUsername.mockResolvedValue({ id: 'user-1', username: 'alice', password: null });

@@ -37,7 +37,7 @@ vi.mock('./PasswordChangeButton', () => ({
 }));
 
 test('renders password change panel and 2fa panel when cloudMode is disabled', () => {
-  mockUseConfig.mockReturnValue({ cloudMode: false });
+  mockUseConfig.mockReturnValue({ cloudMode: false, oidcProviders: [] });
   mockUseTwoFactorStatusQuery.mockReturnValue({
     data: { isEnabled: false, isRequired: false, isConfigured: true },
     isLoading: false,
@@ -52,7 +52,7 @@ test('renders password change panel and 2fa panel when cloudMode is disabled', (
 });
 
 test('hides password panel when cloudMode is enabled', () => {
-  mockUseConfig.mockReturnValue({ cloudMode: true });
+  mockUseConfig.mockReturnValue({ cloudMode: true, oidcProviders: [] });
   mockUseTwoFactorStatusQuery.mockReturnValue({
     data: { isEnabled: false, isRequired: false, isConfigured: true },
     isLoading: false,
@@ -65,7 +65,10 @@ test('hides password panel when cloudMode is enabled', () => {
 });
 
 test('hides password panel for a user who only signs in through the external provider', () => {
-  mockUseConfig.mockReturnValue({ cloudMode: false, oidcEnabled: true });
+  mockUseConfig.mockReturnValue({
+    cloudMode: false,
+    oidcProviders: [{ slug: 'oidc', name: 'Keycloak' }],
+  });
   mockUseLinkedAccountsQuery.mockReturnValue({
     data: [{ id: 'account-1', providerId: 'oidc', accountId: 'subject-1' }],
     isLoading: false,

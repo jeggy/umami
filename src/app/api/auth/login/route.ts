@@ -1,16 +1,21 @@
+import { isCrossSiteRequest } from '@/lib/auth';
 import { createUserSession } from '@/lib/auth-server';
 import { ROLES } from '@/lib/constants';
 import { addTeamBillingStatus } from '@/lib/load';
 import { checkPassword, hasDefaultPassword } from '@/lib/password';
 import prisma from '@/lib/prisma';
 import { parseRequest } from '@/lib/request';
-import { json, serviceUnavailable, unauthorized } from '@/lib/response';
+import { forbidden, json, serviceUnavailable, unauthorized } from '@/lib/response';
 import { getTwoFactorConfigurationError, isTwoFactorConfigured } from '@/lib/two-factor/crypto';
 import { createPartialToken } from '@/lib/two-factor/partial-token';
 import { getAllUserTeams, getUserByUsername } from '@/queries/prisma';
 import { loginRequestSchema } from './schema';
 
 export async function POST(request: Request) {
+  if (isCrossSiteRequest(request)) {
+    return forbidden();
+  }
+
   const { body, error } = await parseRequest(request, loginRequestSchema, { skipAuth: true });
 
   if (error) {
